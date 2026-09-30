@@ -1,0 +1,132 @@
+{
+  "Default": {
+    "reopen_at": "2026-10-01T00:10:00",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 1": {
+    "reopen_at": "2026-10-01T00:10:00",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 2": {
+    "reopen_at": "2026-09-30T23:30:00",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 3": {
+    "reopen_at": "2026-09-30T23:20:00",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 4": {
+    "reopen_at": "2026-10-01T00:20:00",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 5": {
+    "reopen_at": "2026-10-01T01:10:00",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 6": {
+    "reopen_at": "2026-09-30T23:30:00",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 7": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 8": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 9": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 10": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 11": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 12": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 13": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 14": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 15": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 16": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 17": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 18": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 19": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 20": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 21": {
+    "reopen_at": "2026-09-26T00:35:15.043159",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 22": {
+    "reopen_at": "2026-09-26T00:28:51.100978",
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 23": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 24": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  },
+  "Profile 25": {
+    "reopen_at": null,
+    "backoff_until": null,
+    "fail_count": 0
+  }
+}
