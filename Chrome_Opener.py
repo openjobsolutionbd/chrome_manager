@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import time
+from ctypes import wintypes
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -37,6 +38,13 @@ HWND_BOTTOM = 1
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 GWL_EXSTYLE = -20
+WS_EX_TOPMOST = 0x00000008
+WS_EX_TRANSPARENT = 0x00000020
+SWP_NOACTIVATE = 0x0010
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+GW_HWNDPREV = 3
+GA_ROOT = 2
 WS_EX_LAYERED = 0x00080000
 LWA_ALPHA = 0x2
 DEFAULT_REOPEN_WAIT_HOURS = 5  # fallback if a reset time can't be read from the message
@@ -46,6 +54,15 @@ STALE_THRESHOLD_MINUTES = 30   # how far in the past counts as "just lagging" vs
 BACKOFF_BASE_MINUTES = 5       # a profile that fails to open waits this long before the next attempt...
 BACKOFF_CAP_MINUTES = 60       # ...doubling each consecutive failure, up to this ceiling
 IDENTIFY_MANUAL_EVERY_N_CYCLES = 10  # how often to look for manually-opened windows we haven't tagged
+
+# Chrome freezes the page of any window fully covered by other windows, so the
+# limit message never shows up in its UI tree until the user brings it forward.
+# For covered windows we briefly wake them before reading, then restore them.
+WAKE_MODE = "invisible"        # "invisible": wake while fully transparent + click-through (no flicker)
+                               # "visible":   wake for real (brief flicker) -- switch to this if
+                               #              "invisible" does not make Chrome refresh the page
+WAKE_SETTLE_SECONDS = 0.5      # time given to Chrome to repaint/update after the wake
+WAKE_EVERY_SECONDS = 15        # a covered window is woken and checked at most this often
 
 # Matches "resets at 4:30 PM" or "until 2:50 AM" and captures the time.
 RESET_TIME_RE = re.compile(r'(?:resets at|until)\s+(\d{1,2}:\d{2}\s*[AP]M)', re.IGNORECASE)
@@ -84,6 +101,15 @@ user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
 user32.SetWindowLongW.restype = ctypes.c_long
 user32.SetLayeredWindowAttributes.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_ubyte, ctypes.c_uint]
 user32.SetLayeredWindowAttributes.restype = ctypes.c_bool
+
+user32.GetWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+user32.GetWindow.restype = ctypes.c_void_p
+user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+user32.GetAncestor.restype = ctypes.c_void_p
+user32.WindowFromPoint.argtypes = [wintypes.POINT]
+user32.WindowFromPoint.restype = ctypes.c_void_p
+user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.RECT)]
+user32.GetWindowRect.restype = ctypes.c_bool
 
 PROFILE_TAG_PROP = "ClaudeAutomationProfileIndex"
 
@@ -357,6 +383,69 @@ def scan_window(hwnd):
         return " ".join(names[hit_index:]), None
     return None, tuple(names)
 
+_last_wake = {}  # hwnd -> time of last wake-and-scan of that (covered) window
+
+def is_window_covered(hwnd):
+    """True if another window sits on top of this window's centre point.
+    (Best-effort check; minimized windows are not handled here.)"""
+    if user32.IsIconic(hwnd):
+        return False
+    rect = wintypes.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return False
+    point = wintypes.POINT((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+    top = user32.WindowFromPoint(point)
+    if not top:
+        return False
+    return user32.GetAncestor(top, GA_ROOT) != hwnd
+
+def _nearest_normal_window_above(hwnd):
+    """The closest non-topmost window directly above hwnd in the z-order,
+    used to put hwnd back exactly where it was after a wake."""
+    cur = user32.GetWindow(hwnd, GW_HWNDPREV)
+    while cur:
+        if not (user32.GetWindowLongW(cur, GWL_EXSTYLE) & WS_EX_TOPMOST):
+            return cur
+        cur = user32.GetWindow(cur, GW_HWNDPREV)
+    return None
+
+def scan_window_awake(hwnd):
+    """Like scan_window(), but works for windows that are covered by other
+    windows. Chrome stops updating the page of a fully covered window, so a
+    plain scan would never see the limit message. For such windows we raise
+    them (invisibly, without taking focus), scan, and restore the original
+    z-order / styles. Covered windows are only checked every
+    WAKE_EVERY_SECONDS; in between this returns (None, None) = no news."""
+    if not user32.IsWindow(hwnd):
+        return None, None
+    if user32.GetForegroundWindow() == hwnd or not is_window_covered(hwnd):
+        return scan_window(hwnd)
+    now = time.time()
+    if now - _last_wake.get(hwnd, 0) < WAKE_EVERY_SECONDS:
+        return None, None
+    _last_wake[hwnd] = now
+
+    orig_ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    was_layered = bool(orig_ex & WS_EX_LAYERED)
+    above = _nearest_normal_window_above(hwnd)
+    flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+    try:
+        if WAKE_MODE == "invisible":
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, orig_ex | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+            user32.SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA)
+        user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
+        time.sleep(WAKE_SETTLE_SECONDS)
+        return scan_window(hwnd)
+    finally:
+        if user32.IsWindow(hwnd):
+            user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+            if above and user32.IsWindow(above):
+                user32.SetWindowPos(hwnd, above, 0, 0, 0, 0, flags)
+            if WAKE_MODE == "invisible":
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, orig_ex)
+                if was_layered:
+                    user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
+
 def parse_reset_time_today(text):
     """Extracts e.g. '4:30 PM' or '2:50 AM' from the limit message and
     returns (TODAY's datetime for that time, the raw matched string) --
@@ -497,7 +586,7 @@ def close_any_limited_now(state):
         if not user32.IsWindow(hwnd):
             info["hwnd"] = None
             continue
-        hit, _ = scan_window(hwnd)
+        hit, _ = scan_window_awake(hwnd)
         if hit:
             reset_at, reason = compute_reopen_time(hit)
             log(f'[{profile}] limit message found -> closing. Will reopen at {reset_at:%Y-%m-%d %H:%M} ({reason}).')
@@ -542,7 +631,7 @@ try:
                 if not user32.IsWindow(hwnd):
                     info["hwnd"] = None  # closed by the user, or something else
                     continue
-                hit, _ = scan_window(hwnd)
+                hit, _ = scan_window_awake(hwnd)
                 if hit:
                     reset_at, reason = compute_reopen_time(hit)
                     log(f'[{profile}] limit message found -> closing. Will reopen at {reset_at:%Y-%m-%d %H:%M} ({reason}).')
