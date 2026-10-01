@@ -384,6 +384,21 @@ def scan_window(hwnd):
     return None, tuple(names)
 
 _last_wake = {}  # hwnd -> time of last wake-and-scan of that (covered) window
+_wake_logged = set()  # hwnds whose first covered-window check was already logged
+
+def _log_wake_result(hwnd, result):
+    """Leaves a trace in the activity log so it is visible whether the
+    covered-window wake actually works. Logs once per window (not every
+    15 s) to keep the log small; a found limit is logged by the main loop."""
+    hit, names = result
+    if hit or hwnd in _wake_logged:
+        return
+    _wake_logged.add(hwnd)
+    if names:
+        log(f"[wake] covered window {hwnd}: checked, {len(names)} texts read, no limit message.")
+    else:
+        log(f"[wake] covered window {hwnd}: nothing could be read from it "
+            f"(page still frozen or UI tree empty). Try WAKE_MODE = \"visible\".")
 
 def is_window_covered(hwnd):
     """True if another window sits on top of this window's centre point.
@@ -435,7 +450,9 @@ def scan_window_awake(hwnd):
             user32.SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA)
         user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
         time.sleep(WAKE_SETTLE_SECONDS)
-        return scan_window(hwnd)
+        result = scan_window(hwnd)
+        _log_wake_result(hwnd, result)
+        return result
     finally:
         if user32.IsWindow(hwnd):
             user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
