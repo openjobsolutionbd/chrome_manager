@@ -60,7 +60,16 @@ RETRY_BACKOFF_MINUTES = 5      # if still limited shortly after the stated reset
 STALE_THRESHOLD_MINUTES = 30   # how far in the past counts as "just lagging" vs "must mean tomorrow"
 BACKOFF_BASE_MINUTES = 5       # a profile that fails to open waits this long before the next attempt...
 BACKOFF_CAP_MINUTES = 60       # ...doubling each consecutive failure, up to this ceiling
-IDENTIFY_MANUAL_EVERY_N_CYCLES = 10  # how often to look for manually-opened windows we haven't tagged
+IDENTIFY_MANUAL_EVERY_N_CYCLES = 20  # how often to look for manually-opened windows we haven't tagged
+
+# Low-overhead scanning (see "fast page reading" below).
+USE_FAST_SCAN = True              # read each page with ONE cached UI Automation query; falls back to the slow walk on any failure
+FAST_SCAN_MAX_FAILURES = 5        # this many consecutive fast-scan errors -> use the slow walk for the rest of the session
+FULL_READ_EVERY_SECONDS = 10.0   # a page already confirmed readable gets a cheap phrase probe; its full text is re-read this often
+MAX_SCAN_DUTY_CYCLE = 0.25        # scanning may use at most about this share of wall time; the loop sleeps longer if scans get slow
+MAX_ADAPTIVE_SLEEP_SECONDS = 2.0  # ...but it never sleeps longer than this between checks
+RUNNING_PROFILES_TTL_SECONDS = 5.0  # the Chrome process list is only re-read this often (and always right before a launch)
+TARGET_PID_CACHE_SECONDS = 30.0   # remember "this process is the target Chrome" instead of asking Windows every time
 
 # Smart launch protection: defer new launches when the PC is under load.
 SAFE_CPU_PERCENT = 65.0
@@ -303,14 +312,28 @@ def is_target_executable(executable):
     """
     return bool(executable) and _normalized_path(executable) == _normalized_path(CHROME)
 
+_target_pid_cache = {}  # pid -> (is_target, checked_at)
+
 def is_target_window(hwnd):
-    """Check the process that owns a window before touching it."""
+    """Check the process that owns a window before touching it.
+
+    All windows of one Chrome instance share a browser process, so the answer is
+    cached per PID for a short time instead of asking Windows for the process's
+    executable path (an expensive call) for every window on every check."""
     try:
         pid = ctypes.c_ulong(0)
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         if not pid.value:
             return False
-        return is_target_executable(psutil.Process(pid.value).exe())
+        now_ts = time.time()
+        cached = _target_pid_cache.get(pid.value)
+        if cached is not None and now_ts - cached[1] < TARGET_PID_CACHE_SECONDS:
+            return cached[0]
+        result = is_target_executable(psutil.Process(pid.value).exe())
+        if len(_target_pid_cache) > 256:
+            _target_pid_cache.clear()
+        _target_pid_cache[pid.value] = (result, now_ts)
+        return result
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
         return False
 
@@ -457,6 +480,21 @@ def running_profile_names():
                 running.add(arg.split("=", 1)[1])
     return running
 
+_running_cache = {"at": 0.0, "profiles": set()}
+
+def get_running_profiles(force=False):
+    """Profile folders that already have a Chrome process.
+
+    Reading the process list (dozens of Chrome processes, command lines included)
+    is expensive, so the result is cached and only refreshed when it is older than
+    RUNNING_PROFILES_TTL_SECONDS or when forced -- the loop forces it right before
+    a launch, so a launch never relies on a stale answer."""
+    now_ts = time.time()
+    if force or now_ts - _running_cache["at"] >= RUNNING_PROFILES_TTL_SECONDS:
+        _running_cache["profiles"] = running_profile_names()
+        _running_cache["at"] = now_ts
+    return _running_cache["profiles"]
+
 def profiles():
     result = []
     if (USER_DATA / "Default").is_dir():
@@ -517,7 +555,104 @@ def scan_diag():
         return "(diag: UI Automation returned nothing)"
     return f"(diag: names={total}, page_document_found={doc_seen}, page_nodes={page_nodes}, need>={MIN_PAGE_NODES})"
 
+_fast_scan_failures = 0
+_scan_memo = {}        # hwnd -> (time of last full page read, that read was readable)
+_probe_condition = None
+_scan_seconds = 0.0    # time spent scanning since the main loop last reset it
+
+def _probe_for_phrase(uia, root):
+    """Cheapest possible check: ONE search that asks Chrome itself for any element
+    whose name contains a limit phrase (case-insensitive). Nothing but a yes/no
+    comes back, so the cost does not grow with the size of the page."""
+    global _probe_condition
+    if _probe_condition is None:
+        # 3 = IgnoreCase | MatchSubstring
+        conds = [uia.CreatePropertyConditionEx(auto.PropertyId.NameProperty, phrase, 3)
+                 for phrase in TARGET_PHRASES]
+        cond = conds[0]
+        for extra in conds[1:]:
+            cond = uia.CreateOrCondition(cond, extra)
+        _probe_condition = cond
+    return root.FindFirst(auto.TreeScope.Descendants, _probe_condition) is not None
+
+def _scan_window_fast(hwnd):
+    """Low-cost page reading in two tiers (instead of walking the whole window tree
+    one slow cross-process call per node, most of them Chrome's own toolbar/tabs):
+
+    1. PROBE (every check): a page that was fully read recently and was readable only
+       needs one filtered search for the limit phrases. No match -> still clear.
+    2. FULL READ (first time, every FULL_READ_EVERY_SECONDS, or when the probe matched):
+       find the page's Document node(s) and fetch all descendant names in ONE cached
+       query. This gives the reset-time text next to the phrase and re-proves that
+       the page is readable (not frozen/empty).
+
+    Returns (hit, names, readable) like scan_window(), or None when the fast path
+    could not give a trustworthy answer (the caller then uses the slow walk)."""
+    global _last_scan_info
+    uia = auto.AutomationClient.instance().IUIAutomation
+    root = uia.ElementFromHandle(hwnd)
+    if root is None:
+        return None
+    now_ts = time.time()
+    memo = _scan_memo.get(hwnd)
+    if memo is not None and memo[1] and now_ts - memo[0] < FULL_READ_EVERY_SECONDS:
+        if not _probe_for_phrase(uia, root):
+            return None, (), True  # recently proven readable, and no limit phrase right now
+        # a phrase is on screen: fall through to the full read to capture the reset time
+    doc_cond = uia.CreatePropertyCondition(auto.PropertyId.ControlTypeProperty,
+                                           auto.ControlType.DocumentControl)
+    docs = root.FindAll(auto.TreeScope.Descendants, doc_cond)
+    if docs is None or docs.Length == 0:
+        _scan_memo.pop(hwnd, None)
+        return None  # no page Document found: let the slow walk decide
+    cache = uia.CreateCacheRequest()
+    cache.AddProperty(auto.PropertyId.NameProperty)
+    true_cond = uia.CreateTrueCondition()
+    names = []
+    for i in range(docs.Length):
+        found = docs.GetElement(i).FindAllBuildCache(auto.TreeScope.Descendants, true_cond, cache)
+        if found is None:
+            continue
+        for j in range(found.Length):
+            name = found.GetElement(j).CachedName
+            if name:
+                names.append(name)
+    _last_scan_info = (len(names), True, len(names))
+    readable = (len(names) >= MIN_PAGE_NODES) if READABILITY_CHECK else True
+    if len(_scan_memo) > 128:
+        _scan_memo.clear()  # closed windows leave stale handles behind; a clear just costs one full read each
+    _scan_memo[hwnd] = (now_ts, readable)
+    for idx, name in enumerate(names):
+        if text_has_limit_phrase(name):
+            end = idx + 1 + EXTRA_NODES_AFTER_HIT
+            return " ".join(names[idx:end]), None, True
+    return None, tuple(names), readable
+
 def scan_window(hwnd):
+    """Reads a window for the limit message: fast cached page query first, the
+    original full-tree walk as a safe fallback. The fast result is used whenever a
+    Document node was found (a limit hit, a readable page, or a genuinely empty
+    page); any error or missing Document goes to the slow walk, and after
+    FAST_SCAN_MAX_FAILURES consecutive errors the fast path is switched off for
+    the rest of the session so a problem on one PC cannot break detection."""
+    global _fast_scan_failures, _scan_seconds
+    started = time.perf_counter()
+    try:
+        if USE_FAST_SCAN and _fast_scan_failures < FAST_SCAN_MAX_FAILURES:
+            try:
+                result = _scan_window_fast(hwnd)
+                _fast_scan_failures = 0
+                if result is not None:
+                    return result
+            except Exception:
+                _fast_scan_failures += 1
+                if _fast_scan_failures == FAST_SCAN_MAX_FAILURES:
+                    log("Fast page reading failed repeatedly; using the standard slower scan for the rest of this session.")
+        return _scan_window_slow(hwnd)
+    finally:
+        _scan_seconds += time.perf_counter() - started
+
+def _scan_window_slow(hwnd):
     """Walks the window's UI Automation tree, checking for a limit phrase
     as it goes. Once a phrase is found, keeps reading EXTRA_NODES_AFTER_HIT
     more names (instead of stopping immediately) and returns them all
@@ -767,7 +902,8 @@ try:
                 save_state(state)
         failed_this_cycle = []
         launches_paused_this_cycle = False
-        running_profiles = running_profile_names()
+        _scan_seconds = 0.0
+        running_profiles = get_running_profiles()
         for idx, profile in enumerate(plist):
             info = state[profile]
             hwnd = info["hwnd"]
@@ -833,6 +969,10 @@ try:
 
             close_any_limited_now(state)  # catch anything that just hit its limit before we open another
 
+            running_profiles = get_running_profiles(force=True)  # fresh list right before launching
+            if profile in running_profiles:
+                continue  # it turned out to be open already
+
             log(f"[{profile}] opening...")
             any_open = any(s["hwnd"] is not None for s in state.values())
             keep_focus_on = user32.GetForegroundWindow() if any_open else None
@@ -852,7 +992,7 @@ try:
             log(f"End-of-pass retry: {len(failed_this_cycle)} profile(s) failed earlier; retrying once where resources allow.")
             time.sleep(END_PASS_RETRY_DELAY_SECONDS)
             retry_launches_paused = False
-            running_profiles = running_profile_names()
+            running_profiles = get_running_profiles(force=True)
             for profile, idx in failed_this_cycle:
                 info = state[profile]
                 if info["hwnd"] is not None or profile in running_profiles:
@@ -878,7 +1018,12 @@ try:
                     running_profiles.add(profile)
 
         print(f"\r  Last check: {now:%H:%M:%S}   ", end="", flush=True)
-        time.sleep(CHECK_INTERVAL_SECONDS)
+        # Adaptive pause: if this cycle's SCANNING was slow, sleep longer so the watcher
+        # never spends more than ~MAX_SCAN_DUTY_CYCLE of the time scanning. Launching and
+        # closing windows is not counted, so it never delays the next check. When scans are
+        # quick this stays at CHECK_INTERVAL_SECONDS.
+        wait = max(CHECK_INTERVAL_SECONDS, _scan_seconds * (1 - MAX_SCAN_DUTY_CYCLE) / MAX_SCAN_DUTY_CYCLE)
+        time.sleep(min(wait, MAX_ADAPTIVE_SLEEP_SECONDS))
 except KeyboardInterrupt:
     log("Session stopped by user (Ctrl+C).")
     save_state(state)
