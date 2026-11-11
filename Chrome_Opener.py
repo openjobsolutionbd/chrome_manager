@@ -71,6 +71,17 @@ MAX_ADAPTIVE_SLEEP_SECONDS = 2.0  # ...but it never sleeps longer than this betw
 RUNNING_PROFILES_TTL_SECONDS = 5.0  # the Chrome process list is only re-read this often (and always right before a launch)
 TARGET_PID_CACHE_SECONDS = 30.0   # remember "this process is the target Chrome" instead of asking Windows every time
 
+# Covered windows: Chrome normally freezes the page of a window that is completely hidden
+# behind other windows, and a frozen page cannot be read (log: page_nodes=0). These two
+# Chrome switches tell it NOT to treat covered windows as hidden, so they stay readable
+# without bringing anything to the front or stealing focus. They only take effect when
+# Chrome STARTS, so Chrome must be launched by this tool (or closed once and relaunched).
+KEEP_COVERED_WINDOWS_AWAKE = True  # set False to launch Chrome without these switches
+AWAKE_CHROME_FLAGS = [
+    "--disable-features=CalculateNativeWinOcclusion",
+    "--disable-backgrounding-occluded-windows",
+]
+
 # Smart launch protection: defer new launches when the PC is under load.
 SAFE_CPU_PERCENT = 65.0
 SAFE_RAM_PERCENT = 80.0
@@ -480,6 +491,26 @@ def running_profile_names():
                 running.add(arg.split("=", 1)[1])
     return running
 
+def awake_flags_status():
+    """Is the Chrome that is running right now protected against freezing covered windows?
+
+    Returns "off" (the setting is disabled), "no-chrome" (Chrome is not running; the
+    flags will be applied on the next launch), "active" (the running Chrome was started
+    with the switches) or "inactive" (Chrome was started WITHOUT them, so covered
+    windows can still freeze until Chrome is closed once and relaunched by this tool).
+    Only the browser (main) process is checked: helper processes have --type=..."""
+    if not KEEP_COVERED_WINDOWS_AWAKE:
+        return "off"
+    saw_browser = False
+    for info in chrome_processes():
+        args = info.get("cmdline") or []
+        if any(a.startswith("--type=") for a in args):
+            continue
+        saw_browser = True
+        if all(any(a == flag for a in args) for flag in AWAKE_CHROME_FLAGS):
+            return "active"
+    return "inactive" if saw_browser else "no-chrome"
+
 _running_cache = {"at": 0.0, "profiles": set()}
 
 def get_running_profiles(force=False):
@@ -820,7 +851,8 @@ def launch_profile(profile, index, restore_focus_to=None):
     before_handles = set(chrome_windows())
     try:
         subprocess.Popen(
-            [str(CHROME), f"--profile-directory={profile}", "--new-window", TARGET_URL],
+            [str(CHROME), f"--profile-directory={profile}", "--new-window",
+             *(AWAKE_CHROME_FLAGS if KEEP_COVERED_WINDOWS_AWAKE else []), TARGET_URL],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW
@@ -883,6 +915,16 @@ log("SMART CHROME PROFILE OPENER + LIMIT WATCHER -- session started")
 log(f"Detected profiles={len(plist)} max_concurrent={MAX_CONCURRENT_PROFILES} "
     f"check_interval={CHECK_INTERVAL_SECONDS}s safe_cpu<={SAFE_CPU_PERCENT:.0f}% "
     f"safe_ram<={SAFE_RAM_PERCENT:.0f}% retries=one end-of-pass retry + exponential backoff")
+
+_awake = awake_flags_status()
+if _awake == "active":
+    log("Covered-window protection: ACTIVE (Chrome was started with the keep-awake switches).")
+elif _awake == "inactive":
+    log("Covered-window protection: NOT active -- Chrome is already running without the keep-awake "
+        "switches, so windows hidden behind others can still freeze. To fix it once: run "
+        "Chrome_Opener_Close_All.bat, then start this tool again.")
+elif _awake == "no-chrome":
+    log("Covered-window protection: will be applied to every Chrome window this tool opens.")
 
 state = load_state(plist)
 reconnect_existing_windows(state, plist)
