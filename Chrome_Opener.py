@@ -142,10 +142,12 @@ PROFILE_TAG_PROP = "ClaudeAutomationProfileIndex"
 
 LOG_RETENTION_DAYS = 3
 LOG_CLEANUP_INTERVAL_SECONDS = 3600  # re-check hourly while the tool is running
+LOG_MAX_BYTES = 1_000_000            # safety cap: if the log is still bigger than this after the
+                                     # date cleanup, the oldest lines are dropped until ~70% of it remains
 _last_log_cleanup = 0.0
 
 def prune_old_logs(force=False):
-    """Keep only timestamped activity-log entries from the last three days."""
+    """Keep only the last LOG_RETENTION_DAYS days of entries, and never let the file exceed LOG_MAX_BYTES."""
     global _last_log_cleanup
     now_ts = time.time()
     if not force and now_ts - _last_log_cleanup < LOG_CLEANUP_INTERVAL_SECONDS:
@@ -169,6 +171,19 @@ def prune_old_logs(force=False):
                     # Preserve unrecognized lines rather than risk deleting data.
                     pass
                 kept.append(line)
+        # Size safety cap: drop the oldest lines if the file is still too big.
+        if sum(len(l.encode("utf-8")) for l in kept) > LOG_MAX_BYTES:
+            target = int(LOG_MAX_BYTES * 0.7)
+            total = 0
+            start = len(kept)
+            while start > 0:
+                size = len(kept[start - 1].encode("utf-8"))
+                if total + size > target:
+                    break
+                total += size
+                start -= 1
+            kept = kept[start:]
+            changed = True
         if changed:
             with open(LOG_FILE, "w", encoding="utf-8", newline="") as f:
                 f.writelines(kept)
@@ -747,7 +762,7 @@ def parse_reset_time_today(text):
     if not match:
         return None, None
     raw_matched = match.group(1).strip()
-    raw = re.sub(r'[\s.]+', '', raw_matched).upper()  # "12:40 AM" / "12:40 am" / "1:05 p.m." -> "12:40AM"
+    raw = re.sub(r'[\s.]+', '', raw_matched).upper()  # "12:40 AM" / "12:40 am" / "1:05 p.m." -> "12:40AM"
     try:
         parsed = datetime.strptime(raw, "%I:%M%p")
     except ValueError:
