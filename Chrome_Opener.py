@@ -1,3 +1,4 @@
+import atexit
 import ctypes
 import json
 import os
@@ -81,6 +82,14 @@ AWAKE_CHROME_FLAGS = [
     "--disable-features=CalculateNativeWinOcclusion",
     "--disable-backgrounding-occluded-windows",
 ]
+
+# New-window flash: a freshly created Chrome window paints a blank white page for a moment
+# while it loads. With HIDE_UNTIL_LOADED the window is made fully transparent (not minimized,
+# so Chrome keeps rendering it) and stays that way until its page has been read successfully,
+# then it is shown, behind the user's other windows. Safety nets: it is shown anyway after
+# HIDE_MAX_SECONDS, whenever it cannot be closed, and when this tool exits or starts again.
+HIDE_UNTIL_LOADED = True  # set False for the old behaviour (shown again right after launch)
+HIDE_MAX_SECONDS = 20.0   # never keep a window invisible longer than this
 
 # Smart launch protection: defer new launches when the PC is under load.
 SAFE_CPU_PERCENT = 65.0
@@ -386,6 +395,59 @@ def set_window_opacity(hwnd, alpha):
     ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED)
     user32.SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA)
+
+
+_hidden_windows = {}  # hwnd -> (hidden_at, profile) for windows kept transparent until loaded
+
+def hide_window(hwnd, profile):
+    """Make a new window invisible (opacity 0), push it behind everything else and
+    remember it so the watcher can show it once its page has loaded."""
+    set_window_opacity(hwnd, 0)
+    user32.SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+    _hidden_windows[hwnd] = (time.time(), profile)
+
+def reveal_window(hwnd, reason):
+    """Show a window that hide_window() made transparent. Safe to call twice."""
+    entry = _hidden_windows.pop(hwnd, None)
+    if entry is None:
+        return
+    if user32.IsWindow(hwnd):
+        set_window_opacity(hwnd, 255)
+        log(f"[{entry[1]}] window shown after {time.time() - entry[0]:.1f}s ({reason}).")
+
+def maybe_reveal_window(hwnd, readable):
+    """Called after each scan of a tracked window: show it once its page is readable,
+    or when it has been invisible for HIDE_MAX_SECONDS (so a problem can never leave a
+    window invisible for long)."""
+    entry = _hidden_windows.get(hwnd)
+    if entry is None:
+        return
+    if readable:
+        reveal_window(hwnd, "page loaded")
+    elif time.time() - entry[0] >= HIDE_MAX_SECONDS:
+        reveal_window(hwnd, f"page still unreadable after {HIDE_MAX_SECONDS:.0f}s")
+
+def reveal_all_hidden():
+    for hwnd in list(_hidden_windows):
+        reveal_window(hwnd, "tool is stopping")
+
+def purge_hidden_windows():
+    """Forget windows that no longer exist (closed by the user or by Chrome)."""
+    for hwnd in list(_hidden_windows):
+        if not user32.IsWindow(hwnd):
+            _hidden_windows.pop(hwnd, None)
+
+def reveal_leftover_windows():
+    """If an earlier run was killed while a window was transparent, that window would stay
+    invisible. At start-up, make every window this tool tagged opaque again (only windows
+    that are actually layered are touched)."""
+    for hwnd in chrome_windows():
+        if get_profile_index_for_window(hwnd) is None:
+            continue
+        if user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED:
+            set_window_opacity(hwnd, 255)
+
+atexit.register(reveal_all_hidden)  # normal exit and unhandled errors; a hard kill is covered by reveal_leftover_windows()
 
 
 def wait_for_new_window(before_handles):
@@ -880,7 +942,15 @@ def launch_profile(profile, index, restore_focus_to=None):
         log(f"[{profile}] window did not appear.")
         return None, None, False
     tag_window_with_profile_index(hwnd, index)
-    hiding = restore_focus_to is not None and user32.IsWindow(restore_focus_to)
+    can_restore_focus = restore_focus_to is not None and user32.IsWindow(restore_focus_to)
+    if HIDE_UNTIL_LOADED:
+        # Stay transparent until the watcher has read the page (maybe_reveal_window).
+        # Also applies to the very first window, when there is nothing to give focus back to.
+        hide_window(hwnd, profile)
+        if can_restore_focus:
+            user32.SetForegroundWindow(restore_focus_to)
+        return hwnd, None, False
+    hiding = can_restore_focus
     if hiding:
         set_window_opacity(hwnd, 0)  # suppress the white flash while it loads
         user32.SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
@@ -919,6 +989,7 @@ def close_any_limited_now(state):
                 save_state(state)
             else:
                 log(f"[{profile}] could not fully close -- a tab may be blocking it.")
+                reveal_window(hwnd, "it could not be closed")
 
 
 # ================= main: open + watch + auto-reopen, all in one loop =================
@@ -941,6 +1012,7 @@ elif _awake == "inactive":
 elif _awake == "no-chrome":
     log("Covered-window protection: will be applied to every Chrome window this tool opens.")
 
+reveal_leftover_windows()
 state = load_state(plist)
 reconnect_existing_windows(state, plist)
 display_to_folders = load_profile_display_names(plist)
@@ -960,6 +1032,7 @@ try:
         failed_this_cycle = []
         launches_paused_this_cycle = False
         _scan_seconds = 0.0
+        purge_hidden_windows()
         running_profiles = get_running_profiles()
         for idx, profile in enumerate(plist):
             info = state[profile]
@@ -981,7 +1054,9 @@ try:
                         save_state(state)
                     else:
                         log(f"[{profile}] could not fully close -- a tab may be blocking it.")
+                        reveal_window(hwnd, "it could not be closed")
                 elif readable:
+                    maybe_reveal_window(hwnd, True)
                     info["unreadable_first"] = None
                     if info.get("unverified_since") is not None:
                         info["unverified_since"] = None
@@ -989,6 +1064,7 @@ try:
                 else:
                     # Could not read the page. Applies to windows that were fine
                     # at launch too: an unreadable window must never count as clear.
+                    maybe_reveal_window(hwnd, False)
                     t = datetime.now()
                     if info.get("unverified_since") is None:
                         if info.get("unreadable_first") is None:
@@ -1084,5 +1160,7 @@ try:
 except KeyboardInterrupt:
     log("Session stopped by user (Ctrl+C).")
     save_state(state)
+finally:
+    reveal_all_hidden()
 
 input("\nPress Enter to close...")
