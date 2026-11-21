@@ -25,7 +25,7 @@ except ImportError:
     raise SystemExit(1)
 
 # Tool version (see CHANGELOG.md). Bump this with every change that is merged.
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 MAX_PROFILES = 35
 MAX_CONCURRENT_PROFILES = 7    # never more than this many open at the same time

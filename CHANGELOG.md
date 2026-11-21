@@ -1,13 +1,20 @@
 # Changelog
 
 Version number is `VERSION` in `Chrome_Opener.py`. It is printed at the start of every session in `activity_log.txt`
-(`... LIMIT WATCHER v1.2.0 -- session started`), so a log line can always be matched to a version.
+(`... LIMIT WATCHER vX.Y.Z -- session started`), so a log line can always be matched to a version.
 
 Rules: every merged change bumps `VERSION`, adds an entry here, and gets a git tag `vX.Y.Z` on the merge commit.
 Patch (1.2.1) = bug fix, minor (1.3.0) = new behaviour.
 
 Known limit: the log keeps only 3 days. If one session runs longer than 3 days, its start line (and so its version)
 is cleaned out of the log. Only `Chrome_Opener.py` carries the version; the other scripts do not write to the log.
+
+## 1.2.1
+Shut_Down fix (`Chrome_Opener_Shut_Down.py`, and `Shout_Down.py` which stays an identical copy). No change to Chrome_Opener.py itself.
+- Stops Chrome_Opener first. Before, Chrome_Opener reopened every window the shutdown script closed, so Chrome never fully closed and the shutdown was cancelled or worked only sometimes.
+- Waits only as long as Chrome needs to exit. If no window is left and only the same background processes remain for 3 seconds (Chrome's "keep running in the background" setting), it shuts down anyway instead of cancelling. Before, those processes caused a cancel after 30 seconds.
+- Checks for another Chrome channel (Beta/Canary) before closing anything, not after.
+- Shutdown starts immediately (no countdown). If it cancels, windows that Chrome_Opener had made transparent are made visible again, and the message says Chrome_Opener was stopped.
 
 ## 1.2.0
 All changes after v1.1.0, in order of the git history:
