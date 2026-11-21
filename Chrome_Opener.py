@@ -24,6 +24,9 @@ except ImportError:
     input("\nPress Enter to exit...")
     raise SystemExit(1)
 
+# Tool version (see CHANGELOG.md). Bump this with every change that is merged.
+VERSION = "1.2.0"
+
 MAX_PROFILES = 35
 MAX_CONCURRENT_PROFILES = 7    # never more than this many open at the same time
 MAX_WAIT_FOR_WINDOW = 20  # only wait for the OS window; page verification runs in the watcher
@@ -997,7 +1000,7 @@ def close_any_limited_now(state):
 plist = profiles()[:MAX_PROFILES]
 
 log("=" * 64)
-log("SMART CHROME PROFILE OPENER + LIMIT WATCHER -- session started")
+log(f"SMART CHROME PROFILE OPENER + LIMIT WATCHER v{VERSION} -- session started")
 log(f"Detected profiles={len(plist)} max_concurrent={MAX_CONCURRENT_PROFILES} "
     f"check_interval={CHECK_INTERVAL_SECONDS}s safe_cpu<={SAFE_CPU_PERCENT:.0f}% "
     f"safe_ram<={SAFE_RAM_PERCENT:.0f}% retries=one end-of-pass retry + exponential backoff")
