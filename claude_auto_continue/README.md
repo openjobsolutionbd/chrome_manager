@@ -1,6 +1,6 @@
 # Claude Auto Continue
 
-Version 0.1.0 (history in `CHANGELOG.md`). Status: development, inspection stage. It does not click anything yet.
+Version 0.2.0 (history in `CHANGELOG.md`). Status: development, dry run. It does not click anything yet; it only logs what it would press.
 
 ## Goal
 When a Claude chat stops because the free usage limit was reached, claude.ai shows a banner with a button. Two forms are known:
@@ -25,9 +25,9 @@ change or depend on `Chrome_Opener.py`; both can run at the same time.
   buttons and the sidebar links to Windows UI Automation.
 
 ## Stages
-1. **0.1.x, now: inspection (read-only).** `Claude_Auto_Continue_Inspect.bat` writes `inspect_report.txt` next to it (git-ignored, contains chat
+1. **0.1.x: inspection (read-only).** `Claude_Auto_Continue_Inspect.bat` writes `inspect_report.txt` next to it (git-ignored, contains chat
    titles). Send its content (at least sections A and C) to learn the real names.
-2. **0.2.x: dry run.** Finds the buttons and writes to a log what it would press, without pressing.
+2. **0.2.x, now: dry run.** `Claude_Auto_Continue.bat` finds the buttons and writes `auto_continue_log.txt` (git-ignored) with what it would press, without pressing. Only chats whose tab is the open/visible page of a window are seen; visiting other sidebar chats comes later (0.3.x).
 3. **1.0.0: pressing.** Only after the dry run was checked on the real computer.
 
 ## Rules planned for the pressing stage
@@ -35,6 +35,10 @@ change or depend on `Chrome_Opener.py`; both can run at the same time.
 - A limit per chat (maximum presses and a pause between them), so a chat that is still limited cannot cause an endless loop.
 - Use UI Automation actions only: no mouse movement, no keyboard input, no focus change.
 - Low CPU/RAM: look at one chat at a time, and not continuously.
+
+## How to run the dry run (Windows)
+1. Double-click `Claude_Auto_Continue.bat` and leave the window open (Ctrl+C to stop).
+2. When a chat shows "Continue" / "Try again", look in `auto_continue_log.txt` for `DRY-RUN: would press ...` and send the content.
 
 ## How to run the inspection (Windows)
 1. Open the Claude chat window that shows "Continue" or "Try again".

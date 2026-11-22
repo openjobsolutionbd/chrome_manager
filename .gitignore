@@ -2,3 +2,5 @@
 /activity_log.txt
 /profile_state.json
 /claude_auto_continue/inspect_report.txt
+/claude_auto_continue/auto_continue_log.txt
+/claude_auto_continue/auto_continue_state.json
