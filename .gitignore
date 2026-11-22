@@ -1,3 +1,4 @@
 # Local Chrome Manager runtime data (keep on the user's computer)
 /activity_log.txt
 /profile_state.json
+/claude_auto_continue/inspect_report.txt

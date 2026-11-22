@@ -1,10 +1,14 @@
-# Changelog
+# Chrome Manager - changelog
+
+This is the changelog of the project "Chrome Manager" (repository root). The other project in this repository, "Claude Auto Continue",
+has its own version and changelog in `claude_auto_continue/CHANGELOG.md`.
 
 Version number is `VERSION` in `Chrome_Opener.py`. It is printed at the start of every session in `activity_log.txt`
 (`... LIMIT WATCHER vX.Y.Z -- session started`), so a log line can always be matched to a version.
 
-Rules: every merged change bumps `VERSION`, adds an entry here, and gets a git tag `vX.Y.Z` on the merge commit.
-Patch (1.2.1) = bug fix, minor (1.3.0) = new behaviour.
+Rules: every merged change that alters how Chrome Manager's tools behave bumps `VERSION`, adds an entry here, and gets a git tag
+`vX.Y.Z` on the merge commit. Patch (1.2.2) = bug fix, minor (1.3.0) = new behaviour.
+Changes that do not alter the tools' behaviour (documentation, the other project) keep the version.
 
 Known limit: the log keeps only 3 days. If one session runs longer than 3 days, its start line (and so its version)
 is cleaned out of the log. Only `Chrome_Opener.py` carries the version; the other scripts do not write to the log.
