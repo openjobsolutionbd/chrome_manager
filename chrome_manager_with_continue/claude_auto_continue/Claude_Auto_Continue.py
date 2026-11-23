@@ -54,7 +54,7 @@ def create_control(element):
 
 # Project version (see CHANGELOG.md). Bump with every merged change to this project.
 # Claude_Auto_Continue_Inspect.py carries the same number; keep both equal.
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 PROJECT_NAME = "Claude Auto Continue"
 
 DRY_RUN = False                   # True: only log what would be pressed. False: really press the button.
@@ -350,6 +350,7 @@ def build_conditions(uia):
         "any_banner": any_of([name_cond(p, 3) for p, _b in BANNERS]),
         "banner": {p: name_cond(p, 3) for p, _b in BANNERS},
         "limit": any_of([name_cond(p, 3) for p in LIMIT_ACTIVE_PHRASES]),
+        "limit_each": {p: name_cond(p, 3) for p in LIMIT_ACTIVE_PHRASES},
         "button": {b: uia.CreateAndCondition(button_type, name_cond(b, 1)) for _p, b in BANNERS},
         "link": uia.CreatePropertyCondition(auto.PropertyId.ControlTypeProperty, auto.ControlType.HyperlinkControl),
         "document": uia.CreatePropertyCondition(auto.PropertyId.ControlTypeProperty, auto.ControlType.DocumentControl),
@@ -425,6 +426,24 @@ def rect_text(element):
         return f"x={r.left} y={r.top} w={r.right - r.left} h={r.bottom - r.top}"
     return safe(get, "position unknown")
 
+def describe_element(element):
+    """What an element is, for the log: its text, its type, whether it is off screen and where it is."""
+    name = safe(lambda: element.CurrentName, "") or ""
+    kind = safe(lambda: element.CurrentLocalizedControlType, "") or "?"
+    off = safe(lambda: bool(element.CurrentIsOffscreen), "?")
+    return f"'{short(name, 100)}' (type {kind}, offscreen={off}, {rect_text(element)})"
+
+def active_limit_hit(doc, conds):
+    """(phrase, element) of the first 'limit is still active' text on the page, or None when there is none.
+    The element is only used to tell the log what was found."""
+    if doc.FindFirst(TREE_DESCENDANTS, conds["limit"]) is None:
+        return None
+    for phrase in LIMIT_ACTIVE_PHRASES:
+        element = doc.FindFirst(TREE_DESCENDANTS, conds["limit_each"][phrase])
+        if element is not None:
+            return phrase, element
+    return "?", None
+
 def control_of(element):
     return safe(lambda: create_control(element))
 
@@ -479,8 +498,12 @@ def handle_window(uia, conds, hwnd, title, now, tag=None):
         if hit is None:
             continue
         banner_element, phrase, button = hit
-        if doc.FindFirst(TREE_DESCENDANTS, conds["limit"]) is not None:
-            log_changed(key, f"{label} banner '{phrase}' found, but the limit is still active on this page -> not pressing.", now)
+        limit = active_limit_hit(doc, conds)
+        if limit is not None:
+            limit_phrase, limit_element = limit
+            seen = describe_element(limit_element) if limit_element is not None else "(element not found again)"
+            log_changed(key, f"{label} banner '{phrase}' found, but the limit is still active on this page -> not pressing. "
+                             f"Limit text '{limit_phrase}' found in: {seen}. Banner: {describe_element(banner_element)}", now)
             return ""
         found = find_button_near_banner(uia, banner_element, conds, button)
         if not found:
