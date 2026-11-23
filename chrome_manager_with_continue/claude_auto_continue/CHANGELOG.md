@@ -7,6 +7,12 @@ Rules: every merged change to this project bumps `VERSION`, adds an entry here, 
 `auto-continue-vX.Y.Z` on the merge commit. While the tool is unfinished the major number stays 0 (0.1.x inspection, 0.2.x dry run);
 1.0.0 is the first version that presses buttons, after it was checked on the real computer.
 
+## 0.3.3
+Fixes the start-up stop of 0.3.2 ("RuntimeError: This version of uiautomation is not supported").
+- Cause: in uiautomation 2.0.x the client class `_AutomationClient` lives in the submodule `uiautomation.uiautomation`; `from .uiautomation import *` does not copy names that start with an underscore, so 0.3.2 never found it on the package.
+- It is now looked up in the submodule first, then on the package under both names; as a last resort the COM object is created directly (what the client class does internally).
+- Checked with a fake package that has the same layout (client only in the submodule); not yet run on the real Windows computer.
+
 ## 0.3.2
 Fixes a crash at start-up (`AttributeError: module 'uiautomation' has no attribute 'AutomationClient'`) with the installed uiautomation 2.0.x, which left every "Continue" banner unpressed.
 - The UI Automation client is looked up under both names (`_AutomationClient`, `AutomationClient`); a clear message is shown when neither exists.
