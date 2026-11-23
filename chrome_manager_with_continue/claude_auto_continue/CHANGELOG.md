@@ -7,6 +7,12 @@ Rules: every merged change to this project bumps `VERSION`, adds an entry here, 
 `auto-continue-vX.Y.Z` on the merge commit. While the tool is unfinished the major number stays 0 (0.1.x inspection, 0.2.x dry run);
 1.0.0 is the first version that presses buttons, after it was checked on the real computer.
 
+## 0.3.4
+The tool now runs (0.3.3) and finds the "Paused when your free usage ran out" banner in every window, but did not press: every banner was answered with "the limit is still active on this page -> not pressing", and the log did not say which text on the page caused that.
+- That log line now also names the limit phrase that was found, the text of the element that contains it (shortened), its type, whether it is off screen and where it is, and the same facts about the banner element.
+- Nothing else changed: the rule "never press while a limit text is on the page" is kept until the log shows what the text is.
+- Tested with stand-in elements only (the new helpers); NOT yet run on the real Windows computer.
+
 ## 0.3.3
 Fixes the second start-up crash: `RuntimeError: This version of uiautomation is not supported` (seen right after 0.3.2).
 - Cause: uiautomation 2.0.x calls its client class `_AutomationClient`. Python's `import *` does not export names that start with an underscore, so the class is not on the package itself (`uiautomation._AutomationClient`) but only in the library's inner module (`uiautomation.uiautomation._AutomationClient`). 0.3.2 looked only on the package.
