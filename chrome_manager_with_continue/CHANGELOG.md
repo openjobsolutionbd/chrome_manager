@@ -13,6 +13,19 @@ Changes that do not alter the tools' behaviour (documentation, the other project
 Known limit: the log keeps only 3 days. If one session runs longer than 3 days, its start line (and so its version)
 is cleaned out of the log. Only `Chrome_Opener.py` carries the version; the other scripts do not write to the log.
 
+## 1.3.1
+Keeps the window you are working in in front, and makes the log say why a window was closed (not yet tried on real Windows):
+- After this tool opens a new profile window, shows a window that was transparent, or closes one, it hands the keyboard focus back to the window you were
+  working in. If Windows refuses a plain request, it asks once more through the input of the current foreground thread (no key press, no mouse movement;
+  switch `FOCUS_RETRY_WITH_ATTACH` to False to turn that off). If the focus still cannot be returned, the log gets a line starting with `FOCUS:`
+  that names the window which holds the focus.
+- The focus is now handed back also when the new window is the FIRST one this tool has open (before, that case was skipped, so a window you were
+  working in - for example one this tool did not open - lost the focus whenever a profile was opened while none of the tool's own windows was open).
+- A window that does not close by itself (for example Chrome's "Leave site?" question) is brought to the front to answer it; this is now written to the
+  log (`FOCUS: ... did not close by itself`) and the focus is handed back afterwards.
+- The line "limit message found -> closing" now also names the window (chat title, profile) and the text that matched, so a chat that is closed by
+  mistake can be recognised and the cause can be seen in the log.
+
 ## 1.3.0
 Fixes found in a code review (not yet tried on real Windows):
 - "Is this profile already open?" no longer reads Chrome's command line (all profiles share ONE browser process, so that check was wrong:
