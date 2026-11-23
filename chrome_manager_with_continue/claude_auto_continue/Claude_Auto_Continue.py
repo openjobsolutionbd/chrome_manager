@@ -12,6 +12,7 @@ Separate project from Chrome Manager (see README.md in this folder)."""
 import ctypes
 import json
 import os
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -31,16 +32,21 @@ except ImportError:
     raise SystemExit(1)
 
 # --- works with different uiautomation versions ---
-# Newer versions call the client class "_AutomationClient", have no "TreeScope" class and offer
-# CreateControlFromElement only as Control.CreateControlFromElement. The old names are tried as well.
+# uiautomation 2.0.x names the client class "_AutomationClient" (with a leading underscore). Python's
+# "import *" does not export such names, so it is NOT found on the package itself but only in the library's
+# inner module (uiautomation.uiautomation). Older versions call it "AutomationClient". All places are tried.
+# 2.0.x also has no "TreeScope" class, and offers CreateControlFromElement only as Control.CreateControlFromElement.
 TREE_DESCENDANTS = 4   # the UI Automation constant TreeScope_Descendants
 
 def get_uia():
-    for name in ("_AutomationClient", "AutomationClient"):
-        client = getattr(auto, name, None)
-        if client is not None:
-            return client.instance().IUIAutomation
-    raise RuntimeError("This version of uiautomation is not supported. Run: py -m pip install --upgrade uiautomation")
+    modules = (auto, getattr(auto, "uiautomation", None), sys.modules.get("uiautomation.uiautomation"))
+    for module in modules:
+        for name in ("_AutomationClient", "AutomationClient"):
+            client = getattr(module, name, None) if module is not None else None
+            if client is not None:
+                return client.instance().IUIAutomation
+    raise RuntimeError("This version of uiautomation is not supported (no UI Automation client found). "
+                       "Run: py -m pip install --upgrade uiautomation")
 
 def create_control(element):
     maker = getattr(auto, "CreateControlFromElement", None) or auto.Control.CreateControlFromElement
@@ -48,7 +54,7 @@ def create_control(element):
 
 # Project version (see CHANGELOG.md). Bump with every merged change to this project.
 # Claude_Auto_Continue_Inspect.py carries the same number; keep both equal.
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 PROJECT_NAME = "Claude Auto Continue"
 
 DRY_RUN = False                   # True: only log what would be pressed. False: really press the button.
