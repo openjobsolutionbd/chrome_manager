@@ -10,6 +10,7 @@ out", Try again <-> "Stopped by a usage limit"), never while the page still show
 and each chat has a pause between presses and an hourly maximum, so it can never loop.
 Separate project from Chrome Manager (see README.md in this folder)."""
 import ctypes
+import importlib
 import json
 import os
 import time
@@ -31,16 +32,28 @@ except ImportError:
     raise SystemExit(1)
 
 # --- works with different uiautomation versions ---
-# Newer versions call the client class "_AutomationClient", have no "TreeScope" class and offer
+# uiautomation 2.0.x has no "TreeScope" class, keeps its client class "_AutomationClient" in the submodule
+# "uiautomation.uiautomation" (the package does not copy names that start with "_") and offers
 # CreateControlFromElement only as Control.CreateControlFromElement. The old names are tried as well.
 TREE_DESCENDANTS = 4   # the UI Automation constant TreeScope_Descendants
 
 def get_uia():
-    for name in ("_AutomationClient", "AutomationClient"):
-        client = getattr(auto, name, None)
-        if client is not None:
-            return client.instance().IUIAutomation
-    raise RuntimeError("This version of uiautomation is not supported. Run: py -m pip install --upgrade uiautomation")
+    """The IUIAutomation COM object."""
+    holders = []
+    try:
+        holders.append(importlib.import_module("uiautomation.uiautomation"))
+    except Exception:
+        pass
+    holders.append(auto)
+    for holder in holders:
+        for name in ("_AutomationClient", "AutomationClient"):
+            client = getattr(holder, name, None)
+            if client is not None:
+                return client.instance().IUIAutomation
+    # Last resort: create the COM object directly (what the client class does internally).
+    import comtypes.client
+    core = comtypes.client.GetModule("UIAutomationCore.dll")
+    return comtypes.client.CreateObject("{ff48dba4-60ef-4201-aa87-54103eef594e}", interface=core.IUIAutomation)
 
 def create_control(element):
     maker = getattr(auto, "CreateControlFromElement", None) or auto.Control.CreateControlFromElement
@@ -48,7 +61,7 @@ def create_control(element):
 
 # Project version (see CHANGELOG.md). Bump with every merged change to this project.
 # Claude_Auto_Continue_Inspect.py carries the same number; keep both equal.
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 PROJECT_NAME = "Claude Auto Continue"
 
 DRY_RUN = False                   # True: only log what would be pressed. False: really press the button.
