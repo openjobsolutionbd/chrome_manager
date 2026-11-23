@@ -7,6 +7,13 @@ Rules: every merged change to this project bumps `VERSION`, adds an entry here, 
 `auto-continue-vX.Y.Z` on the merge commit. While the tool is unfinished the major number stays 0 (0.1.x inspection, 0.2.x dry run);
 1.0.0 is the first version that presses buttons, after it was checked on the real computer.
 
+## 0.3.2
+Fixes a crash at start-up (`AttributeError: module 'uiautomation' has no attribute 'AutomationClient'`) with the installed uiautomation 2.0.x, which left every "Continue" banner unpressed.
+- The UI Automation client is looked up under both names (`_AutomationClient`, `AutomationClient`); a clear message is shown when neither exists.
+- `auto.TreeScope.Descendants` (not present in uiautomation 2.0.x) is replaced by the constant `TREE_DESCENDANTS = 4`.
+- `auto.CreateControlFromElement` (only `Control.CreateControlFromElement` in 2.0.x) is reached through `create_control()`; without it no button could be pressed.
+- Checked against the source of uiautomation 2.0.29 only; not yet run on the real Windows computer.
+
 ## 0.3.1
 - Only one copy can run at a time (the second stops with a message). `Stop_All.bat` in the repository root stops it.
 

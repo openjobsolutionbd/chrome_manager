@@ -30,7 +30,7 @@ except ImportError:
     raise SystemExit(1)
 
 # Project version (see CHANGELOG.md). Bump with every merged change to this project.
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 PROJECT_NAME = "Claude Auto Continue"
 
 BROWSER_LABEL = "Google Chrome"
