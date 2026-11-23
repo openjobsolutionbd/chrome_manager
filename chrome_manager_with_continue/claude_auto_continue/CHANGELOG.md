@@ -7,6 +7,13 @@ Rules: every merged change to this project bumps `VERSION`, adds an entry here, 
 `auto-continue-vX.Y.Z` on the merge commit. While the tool is unfinished the major number stays 0 (0.1.x inspection, 0.2.x dry run);
 1.0.0 is the first version that presses buttons, after it was checked on the real computer.
 
+## 0.3.5
+Fixes why nothing was ever pressed (seen in the 0.3.4 log: `Limit text 'free messages return' found in: '' (type ?, offscreen=?, position unknown)`).
+- Cause: when UI Automation finds nothing, the library returns an empty (NULL) COM pointer, not `None`. The tool tested `is None`, so "nothing found" was taken as "found". Result: every page counted as "has the Paused banner" (also pages without any banner, such as the new-chat page) and every page counted as "has a limit text", so the guard always refused to press.
+- New helper `present()` (true only for a real element); used for banner, limit text, button search, tabs, sidebar links and the page documents.
+- Tested with stand-in pages that return NULL pointers for "not found": 0.3.4 reports a banner and an active limit on a page with neither; 0.3.5 does not, and presses "Continue" / "Try again" only when the banner and its button are really there and no limit text is.
+- NOT yet run on the real Windows computer.
+
 ## 0.3.4
 The tool now runs (0.3.3) and finds the "Paused when your free usage ran out" banner in every window, but did not press: every banner was answered with "the limit is still active on this page -> not pressing", and the log did not say which text on the page caused that.
 - That log line now also names the limit phrase that was found, the text of the element that contains it (shortened), its type, whether it is off screen and where it is, and the same facts about the banner element.

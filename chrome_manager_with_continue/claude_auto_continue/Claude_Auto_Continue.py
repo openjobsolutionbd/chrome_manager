@@ -54,7 +54,7 @@ def create_control(element):
 
 # Project version (see CHANGELOG.md). Bump with every merged change to this project.
 # Claude_Auto_Continue_Inspect.py carries the same number; keep both equal.
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 PROJECT_NAME = "Claude Auto Continue"
 
 DRY_RUN = False                   # True: only log what would be pressed. False: really press the button.
@@ -179,6 +179,11 @@ def safe(getter, default=None):
         return getter()
     except Exception:
         return default
+
+def present(element):
+    """True when a UI Automation call really returned something. When nothing is found the library hands back an
+    empty (NULL) COM pointer, which is NOT None, so a plain 'is None' test wrongly says 'found'."""
+    return element is not None and bool(element)
 
 def should_scan_title(title):
     return (not REQUIRE_CLAUDE_IN_TITLE) or "claude" in (title or "").casefold()
@@ -361,7 +366,7 @@ def page_documents(root, conds):
     """The web page(s) of the window (UI Automation Document nodes). Everything is searched INSIDE them, never in
     Chrome's own toolbar / tab strip, so a tab title or bookmark can not be mistaken for the banner."""
     docs = root.FindAll(TREE_DESCENDANTS, conds["document"])
-    if docs is None:
+    if not present(docs):
         return []
     return [docs.GetElement(i) for i in range(docs.Length)]
 
@@ -375,11 +380,11 @@ def page_is_readable(uia, doc):
 
 def banner_hit(doc, conds):
     """(banner element, banner text, its button name) when a known banner is on the page, else None."""
-    if doc.FindFirst(TREE_DESCENDANTS, conds["any_banner"]) is None:
+    if not present(doc.FindFirst(TREE_DESCENDANTS, conds["any_banner"])):
         return None
     for phrase, button in BANNERS:
         element = doc.FindFirst(TREE_DESCENDANTS, conds["banner"][phrase])
-        if element is not None:
+        if present(element):
             return element, phrase, button
     return None
 
@@ -396,7 +401,7 @@ def find_button_near_banner(uia, banner_element, conds, button):
         if not node:
             return []
         found = node.FindAll(TREE_DESCENDANTS, conds["button"][button])
-        if found is not None and found.Length > 0:
+        if present(found) and found.Length > 0:
             return [found.GetElement(i) for i in range(found.Length)]
     return []
 
@@ -436,11 +441,11 @@ def describe_element(element):
 def active_limit_hit(doc, conds):
     """(phrase, element) of the first 'limit is still active' text on the page, or None when there is none.
     The element is only used to tell the log what was found."""
-    if doc.FindFirst(TREE_DESCENDANTS, conds["limit"]) is None:
+    if not present(doc.FindFirst(TREE_DESCENDANTS, conds["limit"])):
         return None
     for phrase in LIMIT_ACTIVE_PHRASES:
         element = doc.FindFirst(TREE_DESCENDANTS, conds["limit_each"][phrase])
-        if element is not None:
+        if present(element):
             return phrase, element
     return "?", None
 
@@ -473,7 +478,7 @@ def handle_window(uia, conds, hwnd, title, now, tag=None):
     `tag` is set when the page was brought up by a visit (other tab / sidebar chat)."""
     label = f"[window {hwnd} '{short(title, 50)}']"
     root = uia.ElementFromHandle(hwnd)
-    if root is None:
+    if not present(root):
         return ""
     if user32.IsIconic(hwnd):
         log_changed(f"state|{hwnd}", f"{label} window is MINIMIZED -> its page is frozen by Chrome and can not be read.", now)
@@ -545,7 +550,7 @@ _sidebar_warned = set()
 def list_tabs(root, conds):
     found = root.FindAll(TREE_DESCENDANTS, conds["tab"])
     tabs = []
-    if found is None:
+    if not present(found):
         return tabs
     for i in range(found.Length):
         element = found.GetElement(i)
@@ -582,10 +587,10 @@ def sidebar_links(uia, conds, hwnd):
     """{chat id: (name, element)} of the chat links in the window, in page order."""
     root = uia.ElementFromHandle(hwnd)
     out = {}
-    if root is None:
+    if not present(root):
         return out
     links = root.FindAll(TREE_DESCENDANTS, conds["link"])
-    if links is None:
+    if not present(links):
         return out
     for i in range(min(links.Length, MAX_LINKS_SCANNED)):
         element = links.GetElement(i)
@@ -596,7 +601,7 @@ def sidebar_links(uia, conds, hwnd):
 
 def current_chat_id(uia, conds, hwnd):
     root = uia.ElementFromHandle(hwnd)
-    if root is None:
+    if not present(root):
         return ""
     for doc in page_documents(root, conds):
         chat = chat_id_from_url(element_value(doc))
@@ -610,7 +615,7 @@ def wait_for_page(uia, conds, hwnd, expect_chat=None):
     end = time.time() + PAGE_SETTLE_SECONDS
     while True:
         root = safe(lambda: uia.ElementFromHandle(hwnd))
-        docs = page_documents(root, conds) if root is not None else []
+        docs = page_documents(root, conds) if present(root) else []
         ready = any(page_is_readable(uia, d) for d in docs)
         if ready and expect_chat:
             ready = any(chat_id_from_url(element_value(d)) == expect_chat for d in docs)
@@ -637,7 +642,7 @@ def visit_window(uia, conds, hwnd, title, now):
     _next_visit[hwnd] = now + timedelta(minutes=VISIT_EVERY_MINUTES)
     label = f"[window {hwnd} '{short(title, 50)}']"
     root = uia.ElementFromHandle(hwnd)
-    if root is None:
+    if not present(root):
         return
     started = time.time()
     stats = {"tabs": 0, "chats": 0, "pressed": 0}
@@ -709,10 +714,10 @@ def list_sidebar_chats(uia, conds, hwnd, title, now):
         return
     _next_sidebar[hwnd] = now + timedelta(minutes=SIDEBAR_LIST_EVERY_MINUTES)
     root = uia.ElementFromHandle(hwnd)
-    if root is None:
+    if not present(root):
         return
     links = root.FindAll(TREE_DESCENDANTS, conds["link"])
-    total = 0 if links is None else links.Length
+    total = 0 if not present(links) else links.Length
     names = []
     for i in range(min(total, MAX_LINKS_SCANNED)):
         element = links.GetElement(i)
