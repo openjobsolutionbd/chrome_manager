@@ -26,7 +26,7 @@ except ImportError:
     raise SystemExit(1)
 
 # Tool version (see CHANGELOG.md). Bump this with every change that is merged.
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 MAX_PROFILES = 35
 MAX_CONCURRENT_PROFILES = 7    # never more than this many open at the same time
@@ -428,7 +428,10 @@ def reveal_window(hwnd, reason):
     if entry is None:
         return
     if user32.IsWindow(hwnd):
+        user_focus = user32.GetForegroundWindow()
         set_window_opacity(hwnd, 255)
+        if user_focus and user32.GetForegroundWindow() != user_focus:
+            give_focus_back(user_focus, f"showing {entry[1]}")
         log(f"[{entry[1]}] window shown after {time.time() - entry[0]:.1f}s ({reason}).")
 
 def maybe_reveal_window(hwnd, readable):
@@ -920,6 +923,16 @@ def wait_for_page_or_limit(hwnd, stable_reads_required=2,
     return None, last_readable
 
 def close_window(hwnd, poll_interval=0.1, wm_close_wait=0.6, confirm_wait=0.6):
+    """Closes the window (see _close_window) and, if closing it took the keyboard focus away from the window
+    the user was working in, hands the focus back (and logs a FOCUS line when that is not possible)."""
+    user_focus = user32.GetForegroundWindow()
+    label = describe_window(hwnd)
+    closed = _close_window(hwnd, poll_interval, wm_close_wait, confirm_wait)
+    if user_focus and user_focus != hwnd and user32.IsWindow(user_focus) and user32.GetForegroundWindow() != user_focus:
+        give_focus_back(user_focus, f"closing {label}")
+    return closed
+
+def _close_window(hwnd, poll_interval=0.1, wm_close_wait=0.6, confirm_wait=0.6):
     """Closes the whole window (every tab in that profile) as fast as
     possible: polls every poll_interval instead of blocking on a fixed
     sleep, so it returns the moment the window actually closes. Falls
@@ -939,6 +952,8 @@ def close_window(hwnd, poll_interval=0.1, wm_close_wait=0.6, confirm_wait=0.6):
         # foreground and confirm it.
         # Enter is sent ONLY when this very window really is in front. Windows sometimes refuses to change the
         # foreground window; then the key would land in whatever the user is working in, so it is not sent.
+        log(f"FOCUS: {describe_window(hwnd)} did not close by itself (a 'Leave site?' question?), "
+            "so it is brought to the front to answer it.")
         user32.SetForegroundWindow(hwnd)
         if user32.GetForegroundWindow() == hwnd:
             user32.keybd_event(0x0D, 0, 0, 0)  # VK_RETURN down
@@ -949,6 +964,60 @@ def close_window(hwnd, poll_interval=0.1, wm_close_wait=0.6, confirm_wait=0.6):
                 return True
             time.sleep(poll_interval)
     return not user32.IsWindow(hwnd)
+
+FOCUS_RETRY_WITH_ATTACH = True   # if Windows refuses to hand the keyboard focus back, ask once more through the input of the current foreground thread (no key press, no mouse movement)
+
+def describe_window(hwnd):
+    """Short text for log lines: window handle, title and (if this tool opened it) the profile."""
+    if not hwnd:
+        return "no window"
+    try:
+        buf = ctypes.create_unicode_buffer(160)
+        user32.GetWindowTextW(hwnd, buf, 160)
+        title = " ".join(buf.value.split())[:70]
+        profile = get_profile_for_window(hwnd)
+    except Exception:
+        title, profile = "?", None
+    return f"window {hwnd} ('{title}'{', profile ' + str(profile) if profile else ''})"
+
+def give_focus_back(target, context):
+    """Hands the keyboard focus back to `target` (the window the user was working in) after this tool
+    opened, showed or closed another window. Returns True when `target` is in front again. When that is
+    not possible the log says so (line starting with FOCUS), including which window holds the focus."""
+    if not target or not user32.IsWindow(target):
+        return True
+    try:
+        if user32.GetForegroundWindow() == target:
+            return True
+        user32.SetForegroundWindow(target)
+        if user32.GetForegroundWindow() == target:
+            return True
+        if FOCUS_RETRY_WITH_ATTACH:
+            my_thread = _kernel32.GetCurrentThreadId()
+            fg = user32.GetForegroundWindow()
+            fg_thread = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+            attached = False
+            try:
+                if fg_thread and fg_thread != my_thread:
+                    attached = bool(user32.AttachThreadInput(my_thread, fg_thread, True))
+                user32.SetForegroundWindow(target)
+            finally:
+                if attached:
+                    user32.AttachThreadInput(my_thread, fg_thread, False)
+            if user32.GetForegroundWindow() == target:
+                return True
+        log(f"FOCUS: after {context} the keyboard focus is NOT back in {describe_window(target)}; "
+            f"it is in {describe_window(user32.GetForegroundWindow())}.")
+    except Exception as exc:
+        log(f"FOCUS: could not hand the focus back after {context}: {exc}")
+    return False
+
+def limit_hit_details(hwnd, hit):
+    """For the 'limit message found' log line: which window (chat title) and which text caused the close."""
+    text = " ".join(str(hit).split())
+    if len(text) > 160:
+        text = text[:157] + "..."
+    return f" Window: {describe_window(hwnd)}. Matched text: '{text}'."
 
 def launch_profile(profile, index, restore_focus_to=None):
     """Opens one profile at TARGET_URL and returns (hwnd, matched_limit_text, readable).
@@ -983,13 +1052,13 @@ def launch_profile(profile, index, restore_focus_to=None):
         # Also applies to the very first window, when there is nothing to give focus back to.
         hide_window(hwnd, profile)
         if can_restore_focus:
-            user32.SetForegroundWindow(restore_focus_to)
+            give_focus_back(restore_focus_to, f"opening {profile}")
         return hwnd, None, False
     hiding = can_restore_focus
     if hiding:
         set_window_opacity(hwnd, 0)  # suppress the white flash while it loads
         user32.SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
-        user32.SetForegroundWindow(restore_focus_to)
+        give_focus_back(restore_focus_to, f"opening {profile}")
     # Do not wait here for the page to finish loading. That serial wait was the
     # main launch bottleneck: one slow profile could hold up every profile behind
     # it for up to 30 seconds. Register the window immediately as UNVERIFIED;
@@ -1016,7 +1085,7 @@ def close_any_limited_now(state):
         hit, _, _ = scan_window(hwnd)
         if hit:
             reset_at, reason = compute_reopen_time(hit)
-            log(f'[{profile}] limit message found -> closing. Will reopen at {reset_at:%Y-%m-%d %H:%M} ({reason}).')
+            log(f'[{profile}] limit message found -> closing. Will reopen at {reset_at:%Y-%m-%d %H:%M} ({reason}).' + limit_hit_details(hwnd, hit))
             if close_window(hwnd):
                 info["hwnd"] = None
                 info["reopen_at"] = reset_at
@@ -1082,7 +1151,7 @@ try:
                     hit, _, readable = scan_window(hwnd)
                     if hit:
                         reset_at, reason = compute_reopen_time(hit)
-                        log(f'[{profile}] limit message found -> closing. Will reopen at {reset_at:%Y-%m-%d %H:%M} ({reason}).')
+                        log(f'[{profile}] limit message found -> closing. Will reopen at {reset_at:%Y-%m-%d %H:%M} ({reason}).' + limit_hit_details(hwnd, hit))
                         if close_window(hwnd):
                             info["hwnd"] = None
                             info["reopen_at"] = reset_at
@@ -1147,8 +1216,7 @@ try:
                     continue  # it turned out to be open already
 
                 log(f"[{profile}] opening...")
-                any_open = any(s["hwnd"] is not None for s in state.values())
-                keep_focus_on = user32.GetForegroundWindow() if any_open else None
+                keep_focus_on = user32.GetForegroundWindow() or None
                 new_hwnd, hit, readable = launch_profile(profile, idx, restore_focus_to=keep_focus_on)
                 if new_hwnd is None:
                     record_launch_failure(profile, info)
@@ -1179,8 +1247,7 @@ try:
                         log(f"[{profile}] end-of-pass retry deferred because system load is high; scheduled backoff remains active.")
                         continue
                     log(f"[{profile}] end-of-pass retry...")
-                    any_open = any(s["hwnd"] is not None for s in state.values())
-                    keep_focus_on = user32.GetForegroundWindow() if any_open else None
+                    keep_focus_on = user32.GetForegroundWindow() or None
                     retry_hwnd, retry_hit, retry_readable = launch_profile(profile, idx, restore_focus_to=keep_focus_on)
                     if retry_hwnd is None:
                         record_launch_failure(profile, info, count=False)
