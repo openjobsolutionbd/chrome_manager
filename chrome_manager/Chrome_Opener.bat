@@ -1,7 +1,13 @@
 @echo off
-title Claude Auto Continue
+title Chrome Opener
 color 0A
 setlocal
+
+echo.
+echo ==========================================================
+echo    SMART CHROME PROFILE OPENER + LIMIT WATCHER
+echo ==========================================================
+echo.
 
 where py >nul 2>&1
 if errorlevel 1 (
@@ -32,6 +38,7 @@ if errorlevel 1 (
     )
 )
 
-py "%~dp0Claude_Auto_Continue.py"
+py "%~dp0Chrome_Opener.py"
 
+pause
 endlocal

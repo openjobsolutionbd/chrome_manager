@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import time
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -25,7 +26,7 @@ except ImportError:
     raise SystemExit(1)
 
 # Tool version (see CHANGELOG.md). Bump this with every change that is merged.
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 
 MAX_PROFILES = 35
 MAX_CONCURRENT_PROFILES = 7    # never more than this many open at the same time
@@ -130,6 +131,16 @@ if CHROME is None:
     raise SystemExit(1)
 
 user32 = ctypes.windll.user32
+
+# Only one copy of this tool may run: two copies would open duplicate windows and fight over the log.
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_kernel32.CreateMutexW.restype = ctypes.c_void_p
+_instance_mutex = _kernel32.CreateMutexW(None, False, "Local\\ChromeManagerOpenerSingleInstance")
+if ctypes.get_last_error() == 183:   # ERROR_ALREADY_EXISTS
+    print("Chrome_Opener is already running in another window. Close that one first (or use Stop_All.bat).")
+    input("\nPress Enter to exit...")
+    raise SystemExit(1)
+
 EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
 
 # Correct signatures (ctypes defaults to 32-bit int otherwise, which
@@ -239,9 +250,11 @@ def resources_safe_for_launch():
     _resource_wait_active = True
     return False
 
-def record_launch_failure(profile, info):
-    """Apply exponential backoff after a failed launch attempt."""
-    info["fail_count"] += 1
+def record_launch_failure(profile, info, count=True):
+    """Apply exponential backoff after a failed launch attempt. The one end-of-pass retry of the same cycle
+    does not count as a second failure (count=False), so the backoff grows as documented."""
+    if count:
+        info["fail_count"] += 1
     exponent = min(max(info["fail_count"] - 1, 0), 20)
     minutes = min(BACKOFF_BASE_MINUTES * (2 ** exponent), BACKOFF_CAP_MINUTES)
     info["backoff_until"] = datetime.now() + timedelta(minutes=minutes)
@@ -445,7 +458,7 @@ def reveal_leftover_windows():
     invisible. At start-up, make every window this tool tagged opaque again (only windows
     that are actually layered are touched)."""
     for hwnd in chrome_windows():
-        if get_profile_index_for_window(hwnd) is None:
+        if get_profile_for_window(hwnd) is None:
             continue
         if user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED:
             set_window_opacity(hwnd, 255)
@@ -464,17 +477,35 @@ def wait_for_new_window(before_handles):
     return None
 
 
-def tag_window_with_profile_index(hwnd, index):
-    """Stamps the window itself (at the OS level, not in our script's
-    memory) with which profile it belongs to. This survives our script
-    restarting -- a later run can read it straight off the window."""
-    user32.SetPropW(hwnd, PROFILE_TAG_PROP, ctypes.c_void_p(index + 1))  # +1: 0 means "not found"
+def profile_tag_value(profile):
+    """A number that belongs to the profile FOLDER NAME ("Default" = 1, "Profile N" = N + 1), so adding or
+    deleting another profile can never shift it. 0 is reserved for "not tagged"."""
+    if profile == "Default":
+        return 1
+    match = re.fullmatch(r"Profile (\d+)", profile or "")
+    return int(match.group(1)) + 1 if match else None
 
-def get_profile_index_for_window(hwnd):
-    value = user32.GetPropW(hwnd, PROFILE_TAG_PROP)
-    if not value:
+def profile_from_tag_value(value):
+    if not value or value < 1:
         return None
-    return value - 1
+    return "Default" if value == 1 else f"Profile {value - 1}"
+
+def tag_window(hwnd, profile):
+    """Stamps the window itself (at the OS level, not in our script's memory) with which profile it belongs
+    to. This survives our script restarting -- a later run can read it straight off the window."""
+    value = profile_tag_value(profile)
+    if value is not None:
+        user32.SetPropW(hwnd, PROFILE_TAG_PROP, ctypes.c_void_p(value))
+
+def get_profile_for_window(hwnd):
+    return profile_from_tag_value(user32.GetPropW(hwnd, PROFILE_TAG_PROP))
+
+def find_tagged_window(profile):
+    """A window of this profile that this tool tagged (None if there is none)."""
+    for hwnd in chrome_windows():
+        if get_profile_for_window(hwnd) == profile:
+            return hwnd
+    return None
 
 def reconnect_existing_windows(state, plist):
     """After a restart, re-links any still-open windows we tagged in a
@@ -482,10 +513,9 @@ def reconnect_existing_windows(state, plist):
     immediately instead of treating them as untracked."""
     reconnected = 0
     for hwnd in chrome_windows():
-        idx = get_profile_index_for_window(hwnd)
-        if idx is None or not (0 <= idx < len(plist)):
+        profile = get_profile_for_window(hwnd)
+        if profile is None or profile not in state:
             continue
-        profile = plist[idx]
         if state[profile]["hwnd"] is None:
             state[profile]["hwnd"] = hwnd
             state[profile]["reopen_at"] = None
@@ -523,7 +553,7 @@ def identify_manual_windows(state, plist, display_to_folders):
     found = 0
     tracked_hwnds = {s["hwnd"] for s in state.values() if s["hwnd"] is not None}
     for hwnd in chrome_windows():
-        if hwnd in tracked_hwnds or get_profile_index_for_window(hwnd) is not None:
+        if hwnd in tracked_hwnds or get_profile_for_window(hwnd) is not None:
             continue  # already tracked or already tagged by us
         texts = window_texts(hwnd)
         if not texts:
@@ -535,8 +565,7 @@ def identify_manual_windows(state, plist, display_to_folders):
             if state[folder]["hwnd"] is not None:
                 continue
             if any(display_name in t for t in texts):
-                idx = plist.index(folder)
-                tag_window_with_profile_index(hwnd, idx)
+                tag_window(hwnd, folder)
                 state[folder]["hwnd"] = hwnd
                 state[folder]["reopen_at"] = None
                 found += 1
@@ -908,9 +937,12 @@ def close_window(hwnd, poll_interval=0.1, wm_close_wait=0.6, confirm_wait=0.6):
         # Still open -- a "Leave site?" confirmation may be blocking it.
         # Its default button responds to Enter -- bring the window to the
         # foreground and confirm it.
+        # Enter is sent ONLY when this very window really is in front. Windows sometimes refuses to change the
+        # foreground window; then the key would land in whatever the user is working in, so it is not sent.
         user32.SetForegroundWindow(hwnd)
-        user32.keybd_event(0x0D, 0, 0, 0)  # VK_RETURN down
-        user32.keybd_event(0x0D, 0, 2, 0)  # VK_RETURN up
+        if user32.GetForegroundWindow() == hwnd:
+            user32.keybd_event(0x0D, 0, 0, 0)  # VK_RETURN down
+            user32.keybd_event(0x0D, 0, 2, 0)  # VK_RETURN up
         deadline = time.time() + confirm_wait
         while time.time() < deadline:
             if not user32.IsWindow(hwnd):
@@ -944,7 +976,7 @@ def launch_profile(profile, index, restore_focus_to=None):
     if hwnd is None:
         log(f"[{profile}] window did not appear.")
         return None, None, False
-    tag_window_with_profile_index(hwnd, index)
+    tag_window(hwnd, profile)
     can_restore_focus = restore_focus_to is not None and user32.IsWindow(restore_focus_to)
     if HIDE_UNTIL_LOADED:
         # Stay transparent until the watcher has read the page (maybe_reveal_window).
@@ -1026,140 +1058,152 @@ print("\nOpening profiles and watching continuously. Press Ctrl+C to stop.\n")
 cycle_count = 0
 
 try:
+    consecutive_errors = 0
     while True:
-        now = datetime.now()
-        cycle_count += 1
-        if display_to_folders and cycle_count % IDENTIFY_MANUAL_EVERY_N_CYCLES == 0:
-            if identify_manual_windows(state, plist, display_to_folders):
-                save_state(state)
-        failed_this_cycle = []
-        launches_paused_this_cycle = False
-        _scan_seconds = 0.0
-        purge_hidden_windows()
-        running_profiles = get_running_profiles()
-        for idx, profile in enumerate(plist):
-            info = state[profile]
-            hwnd = info["hwnd"]
-
-            if hwnd is not None:
-                if not user32.IsWindow(hwnd):
-                    info["hwnd"] = None  # closed by the user, or something else
-                    info["unverified_since"] = None
-                    continue
-                hit, _, readable = scan_window(hwnd)
-                if hit:
-                    reset_at, reason = compute_reopen_time(hit)
-                    log(f'[{profile}] limit message found -> closing. Will reopen at {reset_at:%Y-%m-%d %H:%M} ({reason}).')
-                    if close_window(hwnd):
-                        info["hwnd"] = None
-                        info["reopen_at"] = reset_at
-                        info["unverified_since"] = None
-                        save_state(state)
-                    else:
-                        log(f"[{profile}] could not fully close -- a tab may be blocking it.")
-                        reveal_window(hwnd, "it could not be closed")
-                elif readable:
-                    maybe_reveal_window(hwnd, True)
-                    info["unreadable_first"] = None
-                    if info.get("unverified_since") is not None:
-                        info["unverified_since"] = None
-                        log(f"[{profile}] page is now readable -- no limit message, confirmed clear.")
-                else:
-                    # Could not read the page. Applies to windows that were fine
-                    # at launch too: an unreadable window must never count as clear.
-                    maybe_reveal_window(hwnd, False)
-                    t = datetime.now()
-                    if info.get("unverified_since") is None:
-                        if info.get("unreadable_first") is None:
-                            info["unreadable_first"] = t
-                        elif (t - info["unreadable_first"]).total_seconds() >= UNREADABLE_FLAG_SECONDS:
-                            info["unverified_since"] = t
-                            log(f"[{profile}] page became unreadable -- limit status UNKNOWN until it can be "
-                                f"read again. {scan_diag()}")
-                    elif t - info["unverified_since"] >= timedelta(minutes=UNREADABLE_WARN_MINUTES):
-                        info["unverified_since"] = t  # warn again after another interval
-                        log(f"[{profile}] WARNING: page still unreadable after {UNREADABLE_WARN_MINUTES}+ min "
-                            f"-- limit status unknown, please check this window manually. {scan_diag()}")
-                continue
-
-            reopen_at = info["reopen_at"]
-            if reopen_at is not None and now < reopen_at:
-                continue  # still waiting for the reset time
-
-            backoff_until = info["backoff_until"]
-            if backoff_until is not None and now < backoff_until:
-                continue  # this profile has been failing -- waiting out its backoff
-
-            if profile in running_profiles:
-                continue  # already open outside our tracking -- leave it alone
-
-            open_count = sum(1 for s in state.values() if s["hwnd"] is not None)
-            if open_count >= MAX_CONCURRENT_PROFILES:
-                continue  # at the concurrency cap -- wait for a slot to free up
-
-            if launches_paused_this_cycle:
-                continue  # still monitor existing profiles, but defer new launches until next cycle
-            if not resources_safe_for_launch():
-                launches_paused_this_cycle = True
-                continue
-
-            close_any_limited_now(state)  # catch anything that just hit its limit before we open another
-
-            running_profiles = get_running_profiles(force=True)  # fresh list right before launching
-            if profile in running_profiles:
-                continue  # it turned out to be open already
-
-            log(f"[{profile}] opening...")
-            any_open = any(s["hwnd"] is not None for s in state.values())
-            keep_focus_on = user32.GetForegroundWindow() if any_open else None
-            new_hwnd, hit, readable = launch_profile(profile, idx, restore_focus_to=keep_focus_on)
-            if new_hwnd is None:
-                record_launch_failure(profile, info)
-                failed_this_cycle.append((profile, idx))
-                continue
-
-            record_launch_success(profile, info, new_hwnd, hit, state, readable)
-            running_profiles.add(profile)
-
-        # One extra opportunity for profiles that failed earlier in this scan.
-        # It is intentionally bounded: persistent failures use the normal backoff
-        # and do not block monitoring for the rest of the session.
-        if failed_this_cycle:
-            log(f"End-of-pass retry: {len(failed_this_cycle)} profile(s) failed earlier; retrying once where resources allow.")
-            time.sleep(END_PASS_RETRY_DELAY_SECONDS)
-            retry_launches_paused = False
-            running_profiles = get_running_profiles(force=True)
-            for profile, idx in failed_this_cycle:
+        try:
+            now = datetime.now()
+            cycle_count += 1
+            if display_to_folders and cycle_count % IDENTIFY_MANUAL_EVERY_N_CYCLES == 0:
+                if identify_manual_windows(state, plist, display_to_folders):
+                    save_state(state)
+            failed_this_cycle = []
+            launches_paused_this_cycle = False
+            _scan_seconds = 0.0
+            purge_hidden_windows()
+            for idx, profile in enumerate(plist):
                 info = state[profile]
-                if info["hwnd"] is not None or profile in running_profiles:
-                    continue  # avoid duplicate windows if a launch eventually appeared
+                hwnd = info["hwnd"]
+
+                if hwnd is not None:
+                    if not user32.IsWindow(hwnd):
+                        info["hwnd"] = None  # closed by the user, or something else
+                        info["unverified_since"] = None
+                        continue
+                    hit, _, readable = scan_window(hwnd)
+                    if hit:
+                        reset_at, reason = compute_reopen_time(hit)
+                        log(f'[{profile}] limit message found -> closing. Will reopen at {reset_at:%Y-%m-%d %H:%M} ({reason}).')
+                        if close_window(hwnd):
+                            info["hwnd"] = None
+                            info["reopen_at"] = reset_at
+                            info["unverified_since"] = None
+                            save_state(state)
+                        else:
+                            log(f"[{profile}] could not fully close -- a tab may be blocking it.")
+                            reveal_window(hwnd, "it could not be closed")
+                    elif readable:
+                        maybe_reveal_window(hwnd, True)
+                        info["unreadable_first"] = None
+                        if info.get("unverified_since") is not None:
+                            info["unverified_since"] = None
+                            log(f"[{profile}] page is now readable -- no limit message, confirmed clear.")
+                    else:
+                        # Could not read the page. Applies to windows that were fine
+                        # at launch too: an unreadable window must never count as clear.
+                        maybe_reveal_window(hwnd, False)
+                        t = datetime.now()
+                        if info.get("unverified_since") is None:
+                            if info.get("unreadable_first") is None:
+                                info["unreadable_first"] = t
+                            elif (t - info["unreadable_first"]).total_seconds() >= UNREADABLE_FLAG_SECONDS:
+                                info["unverified_since"] = t
+                                log(f"[{profile}] page became unreadable -- limit status UNKNOWN until it can be "
+                                    f"read again. {scan_diag()}")
+                        elif t - info["unverified_since"] >= timedelta(minutes=UNREADABLE_WARN_MINUTES):
+                            info["unverified_since"] = t  # warn again after another interval
+                            log(f"[{profile}] WARNING: page still unreadable after {UNREADABLE_WARN_MINUTES}+ min "
+                                f"-- limit status unknown, please check this window manually. {scan_diag()}")
+                    continue
+
+                reopen_at = info["reopen_at"]
+                if reopen_at is not None and now < reopen_at:
+                    continue  # still waiting for the reset time
+
+                backoff_until = info["backoff_until"]
+                if backoff_until is not None and now < backoff_until:
+                    continue  # this profile has been failing -- waiting out its backoff
+
+                existing = find_tagged_window(profile)
+                if existing is not None:
+                    # A window of this profile exists but was not tracked (for example after a restart).
+                    info["hwnd"] = existing
+                    info["reopen_at"] = None
+                    log(f"[{profile}] found its already-open window; tracking it again.")
+                    continue
+
                 open_count = sum(1 for s in state.values() if s["hwnd"] is not None)
                 if open_count >= MAX_CONCURRENT_PROFILES:
-                    log(f"[{profile}] end-of-pass retry skipped: concurrency limit reached.")
-                    continue
-                if retry_launches_paused:
-                    continue
+                    continue  # at the concurrency cap -- wait for a slot to free up
+
+                if launches_paused_this_cycle:
+                    continue  # still monitor existing profiles, but defer new launches until next cycle
                 if not resources_safe_for_launch():
-                    retry_launches_paused = True
-                    log(f"[{profile}] end-of-pass retry deferred because system load is high; scheduled backoff remains active.")
+                    launches_paused_this_cycle = True
                     continue
-                log(f"[{profile}] end-of-pass retry...")
+
+                close_any_limited_now(state)  # catch anything that just hit its limit before we open another
+
+                if find_tagged_window(profile) is not None:
+                    continue  # it turned out to be open already
+
+                log(f"[{profile}] opening...")
                 any_open = any(s["hwnd"] is not None for s in state.values())
                 keep_focus_on = user32.GetForegroundWindow() if any_open else None
-                retry_hwnd, retry_hit, retry_readable = launch_profile(profile, idx, restore_focus_to=keep_focus_on)
-                if retry_hwnd is None:
+                new_hwnd, hit, readable = launch_profile(profile, idx, restore_focus_to=keep_focus_on)
+                if new_hwnd is None:
                     record_launch_failure(profile, info)
-                else:
-                    record_launch_success(profile, info, retry_hwnd, retry_hit, state, retry_readable)
-                    running_profiles.add(profile)
+                    failed_this_cycle.append((profile, idx))
+                    continue
 
-        print(f"\r  Last check: {now:%H:%M:%S}   ", end="", flush=True)
-        # Adaptive pause: if this cycle's SCANNING was slow, sleep longer so the watcher
-        # never spends more than ~MAX_SCAN_DUTY_CYCLE of the time scanning. Launching and
-        # closing windows is not counted, so it never delays the next check. When scans are
-        # quick this stays at CHECK_INTERVAL_SECONDS.
-        wait = max(CHECK_INTERVAL_SECONDS, _scan_seconds * (1 - MAX_SCAN_DUTY_CYCLE) / MAX_SCAN_DUTY_CYCLE)
-        time.sleep(min(wait, MAX_ADAPTIVE_SLEEP_SECONDS))
+                record_launch_success(profile, info, new_hwnd, hit, state, readable)
+
+            # One extra opportunity for profiles that failed earlier in this scan.
+            # It is intentionally bounded: persistent failures use the normal backoff
+            # and do not block monitoring for the rest of the session.
+            if failed_this_cycle:
+                log(f"End-of-pass retry: {len(failed_this_cycle)} profile(s) failed earlier; retrying once where resources allow.")
+                time.sleep(END_PASS_RETRY_DELAY_SECONDS)
+                retry_launches_paused = False
+                for profile, idx in failed_this_cycle:
+                    info = state[profile]
+                    if info["hwnd"] is not None or find_tagged_window(profile) is not None:
+                        continue  # avoid duplicate windows if a launch eventually appeared
+                    open_count = sum(1 for s in state.values() if s["hwnd"] is not None)
+                    if open_count >= MAX_CONCURRENT_PROFILES:
+                        log(f"[{profile}] end-of-pass retry skipped: concurrency limit reached.")
+                        continue
+                    if retry_launches_paused:
+                        continue
+                    if not resources_safe_for_launch():
+                        retry_launches_paused = True
+                        log(f"[{profile}] end-of-pass retry deferred because system load is high; scheduled backoff remains active.")
+                        continue
+                    log(f"[{profile}] end-of-pass retry...")
+                    any_open = any(s["hwnd"] is not None for s in state.values())
+                    keep_focus_on = user32.GetForegroundWindow() if any_open else None
+                    retry_hwnd, retry_hit, retry_readable = launch_profile(profile, idx, restore_focus_to=keep_focus_on)
+                    if retry_hwnd is None:
+                        record_launch_failure(profile, info, count=False)
+                    else:
+                        record_launch_success(profile, info, retry_hwnd, retry_hit, state, retry_readable)
+
+            print(f"\r  Last check: {now:%H:%M:%S}   ", end="", flush=True)
+            # Adaptive pause: if this cycle's SCANNING was slow, sleep longer so the watcher
+            # never spends more than ~MAX_SCAN_DUTY_CYCLE of the time scanning. Launching and
+            # closing windows is not counted, so it never delays the next check. When scans are
+            # quick this stays at CHECK_INTERVAL_SECONDS.
+            wait = max(CHECK_INTERVAL_SECONDS, _scan_seconds * (1 - MAX_SCAN_DUTY_CYCLE) / MAX_SCAN_DUTY_CYCLE)
+            time.sleep(min(wait, MAX_ADAPTIVE_SLEEP_SECONDS))
+            consecutive_errors = 0
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            consecutive_errors += 1
+            log(f"UNEXPECTED ERROR in the main loop (#{consecutive_errors}); the tool keeps running:\n" + traceback.format_exc())
+            if consecutive_errors >= 20:
+                log("20 errors in a row -- stopping. Please send the log.")
+                break
+            time.sleep(5)
 except KeyboardInterrupt:
     log("Session stopped by user (Ctrl+C).")
     save_state(state)
