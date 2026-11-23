@@ -13,6 +13,18 @@ Changes that do not alter the tools' behaviour (documentation, the other project
 Known limit: the log keeps only 3 days. If one session runs longer than 3 days, its start line (and so its version)
 is cleaned out of the log. Only `Chrome_Opener.py` carries the version; the other scripts do not write to the log.
 
+## 1.3.0
+Fixes found in a code review (not yet tried on real Windows):
+- "Is this profile already open?" no longer reads Chrome's command line (all profiles share ONE browser process, so that check was wrong:
+  the first profile could look "open" forever and later ones never). It looks for a window carrying this tool's profile tag instead.
+- The profile tag on a window is now derived from the profile folder name ("Default", "Profile N"), not from the position in the list, so adding or
+  deleting a profile can not attach a window to the wrong profile after a restart.
+- `Enter` for a "Leave site?" question is sent only when the window really is in front (Chrome_Opener and Close_All); before, it could land in another program.
+- An unexpected error in the main loop is written to the log (with details) and the tool keeps running (stops after 20 errors in a row). Before, the window just disappeared.
+- The end-of-pass retry no longer counts as a second failure, so the backoff grows as documented.
+- Only one Chrome_Opener can run at a time.
+- New `Start_All.bat` and `Stop_All.bat` / `Stop_All.py` (stops both tools, then closes the Chrome windows politely).
+
 ## 1.2.1
 Shut_Down fix (`Chrome_Opener_Shut_Down.py`, and `Shout_Down.py` which stays an identical copy). No change to Chrome_Opener.py itself.
 - Stops Chrome_Opener first. Before, Chrome_Opener reopened every window the shutdown script closed, so Chrome never fully closed and the shutdown was cancelled or worked only sometimes.

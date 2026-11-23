@@ -1,6 +1,6 @@
 """Claude Auto Continue -- finds the "Continue" / "Try again" button of a Claude chat that stopped at the
-usage limit and (when DRY_RUN is False) presses it. Version 0.2.0 runs in DRY-RUN mode: it only writes to
-auto_continue_log.txt what it WOULD press. Nothing is clicked.
+usage limit and (when DRY_RUN is False) presses it. Version 0.3.x also visits the other tabs and the sidebar chats of each profile window.
+With DRY_RUN = True it only writes to auto_continue_log.txt what it WOULD press.
 
 How it stays light: every SCAN_INTERVAL_SECONDS it asks each Claude window ONE cheap question ("is a known
 banner text on this page?"). Only when the answer is yes does it look for the button. Pressing uses the
@@ -32,19 +32,29 @@ except ImportError:
 
 # Project version (see CHANGELOG.md). Bump with every merged change to this project.
 # Claude_Auto_Continue_Inspect.py carries the same number; keep both equal.
-VERSION = "0.2.0"
+VERSION = "0.3.1"
 PROJECT_NAME = "Claude Auto Continue"
 
-DRY_RUN = True                    # True: only log what would be pressed. False: really press the button.
+DRY_RUN = False                   # True: only log what would be pressed. False: really press the button.
 SCAN_INTERVAL_SECONDS = 30        # how often every Claude window is checked
 WINDOW_GAP_SECONDS = 0.2          # small pause between two windows, so the checks never pile up
 MIN_GAP_MINUTES = 10              # per chat: at least this long between two presses
 MAX_PRESSES_PER_HOUR = 3          # per chat: never more presses than this in one hour
 REPEAT_LOG_MINUTES = 10           # the same situation is written to the log again only after this long
-LIST_SIDEBAR_CHATS = True         # log the chat list of the sidebar (information for the next version)
+LIST_SIDEBAR_CHATS = False        # log the chat list of the sidebar (information for the next version)
 SIDEBAR_LIST_EVERY_MINUTES = 30
 MAX_LINKS_SCANNED = 150
 MAX_SIDEBAR_NAMES_LOGGED = 20
+BANNER_CONTAINER_LEVELS = 5       # how many levels above the banner text the button is searched in
+VISIT_TABS = True                 # also look at the other Claude tabs of a window (switches the tab, then switches back)
+VISIT_SIDEBAR = True              # also open the chats of the sidebar one by one, then return to the first chat
+VISIT_EVERY_MINUTES = 5           # per window: how often such a visit round is made
+MAX_CHATS_PER_ROUND = 8           # per window and round: at most this many sidebar chats are opened
+MAX_VISIT_SECONDS = 90            # per window and round: a visit never takes longer than this
+MIN_SETTLE_SECONDS = 1.5          # wait after switching a tab / chat before reading it
+PAGE_SETTLE_SECONDS = 8           # ...and at most this long until the page is readable
+BANNER_RENDER_SECONDS = 1.5       # extra wait once the page is readable: the banner appears a moment later
+HOLD_AFTER_PRESS_MINUTES = 5      # after a press the window is left alone (no switching) so the chat can continue
 REQUIRE_CLAUDE_IN_TITLE = True    # only windows whose title contains "Claude" are looked at
 HISTORY_KEEP_HOURS = 2
 
@@ -284,7 +294,9 @@ def load_state():
     try:
         if STATE_FILE.exists():
             with open(STATE_FILE, "r", encoding="utf-8") as f:
-                history.update(history_from_json(json.load(f).get("presses")))
+                # Chat ids stay valid after a restart; window-handle keys ("hwnd:...") do not, so they are dropped.
+                loaded = history_from_json(json.load(f).get("presses"))
+                history.update({k: v for k, v in loaded.items() if not k.startswith("hwnd:")})
     except Exception as exc:
         log(f"Could not read {STATE_FILE.name} ({exc}); starting with an empty press history.")
 
@@ -318,17 +330,52 @@ def build_conditions(uia):
         "limit": any_of([name_cond(p, 3) for p in LIMIT_ACTIVE_PHRASES]),
         "button": {b: uia.CreateAndCondition(button_type, name_cond(b, 1)) for _p, b in BANNERS},
         "link": uia.CreatePropertyCondition(auto.PropertyId.ControlTypeProperty, auto.ControlType.HyperlinkControl),
+        "document": uia.CreatePropertyCondition(auto.PropertyId.ControlTypeProperty, auto.ControlType.DocumentControl),
+        "tab": uia.CreatePropertyCondition(auto.PropertyId.ControlTypeProperty, auto.ControlType.TabItemControl),
     }
 
-def banner_hit(root, conds):
-    """(banner text, its button name) when a known banner is on the page, else None. One cheap question
-    first; the individual banners are only asked about when that first answer is yes."""
-    if root.FindFirst(auto.TreeScope.Descendants, conds["any_banner"]) is None:
+def page_documents(root, conds):
+    """The web page(s) of the window (UI Automation Document nodes). Everything is searched INSIDE them, never in
+    Chrome's own toolbar / tab strip, so a tab title or bookmark can not be mistaken for the banner."""
+    docs = root.FindAll(auto.TreeScope.Descendants, conds["document"])
+    if docs is None:
+        return []
+    return [docs.GetElement(i) for i in range(docs.Length)]
+
+def page_is_readable(uia, doc):
+    """A frozen page (window covered by other windows or minimized) has a Document node with NO children."""
+    try:
+        child = uia.ControlViewWalker.GetFirstChildElement(doc)
+        return bool(child)
+    except Exception:
+        return False
+
+def banner_hit(doc, conds):
+    """(banner element, banner text, its button name) when a known banner is on the page, else None."""
+    if doc.FindFirst(auto.TreeScope.Descendants, conds["any_banner"]) is None:
         return None
     for phrase, button in BANNERS:
-        if root.FindFirst(auto.TreeScope.Descendants, conds["banner"][phrase]) is not None:
-            return phrase, button
+        element = doc.FindFirst(auto.TreeScope.Descendants, conds["banner"][phrase])
+        if element is not None:
+            return element, phrase, button
     return None
+
+def find_button_near_banner(uia, banner_element, conds, button):
+    """Looks for the button only in the container of the banner text: starts at the banner element and goes up
+    a few levels. The first level that contains the exact button wins. Returns the elements found (list)."""
+    walker = uia.ControlViewWalker
+    node = banner_element
+    for _level in range(BANNER_CONTAINER_LEVELS):
+        try:
+            node = walker.GetParentElement(node)
+        except Exception:
+            return []
+        if not node:
+            return []
+        found = node.FindAll(auto.TreeScope.Descendants, conds["button"][button])
+        if found is not None and found.Length > 0:
+            return [found.GetElement(i) for i in range(found.Length)]
+    return []
 
 def button_control(element):
     return auto.CreateControlFromElement(element)
@@ -356,48 +403,258 @@ def rect_text(element):
         return f"x={r.left} y={r.top} w={r.right - r.left} h={r.bottom - r.top}"
     return safe(get, "position unknown")
 
-def handle_window(uia, conds, hwnd, title, now):
-    """One check of one window. Writes to the log when there is something to say."""
-    key = f"{hwnd}|{title}"
+def control_of(element):
+    return safe(lambda: auto.CreateControlFromElement(element))
+
+def element_value(element):
+    """The 'value' Chrome gives an element: for a link its address, for the page Document its address."""
+    control = control_of(element)
+    return safe(lambda: control.GetLegacyIAccessiblePattern().Value, "") or ""
+
+def chat_id_from_url(url):
+    if "/chat/" not in (url or ""):
+        return ""
+    return url.split("/chat/", 1)[1].split("?", 1)[0].split("#", 1)[0].strip("/")
+
+def page_key(hwnd, docs):
+    """Counter key of the chat on screen: the chat id (stable across restarts, title changes and tab switches);
+    when the address can not be read, one counter for the whole window."""
+    for doc in docs:
+        chat = chat_id_from_url(element_value(doc))
+        if chat:
+            return chat
+    return f"hwnd:{hwnd}"
+
+_hold_until = {}    # window -> no tab / chat switching before this time (a chat was just continued)
+
+def handle_window(uia, conds, hwnd, title, now, tag=None):
+    """One check of the page that is on screen in one window. Returns "pressed" when the button was really pressed.
+    `tag` is set when the page was brought up by a visit (other tab / sidebar chat)."""
+    label = f"[window {hwnd} '{short(title, 50)}']"
+    root = uia.ElementFromHandle(hwnd)
+    if root is None:
+        return ""
+    if user32.IsIconic(hwnd):
+        log_changed(f"state|{hwnd}", f"{label} window is MINIMIZED -> its page is frozen by Chrome and can not be read.", now)
+        return ""
+    docs = page_documents(root, conds)
+    if not docs:
+        log_changed(f"state|{hwnd}", f"{label} no web page found in this window (not a page, or Chrome has not exposed it).", now)
+        return ""
+    if not any(page_is_readable(uia, d) for d in docs):
+        log_changed(f"state|{hwnd}", f"{label} page is EMPTY/FROZEN (window covered by other windows? Chrome freezes such pages) -> cannot look for the banner.", now)
+        return ""
+    key = page_key(hwnd, docs)
+    if tag:
+        label = f"{label} [{tag}, chat {short(key, 14)}]"
+    hits = [banner_hit(d, conds) for d in docs]
+    if all(h is None for h in hits):
+        if tag is None:
+            log_changed(f"state|{hwnd}", f"{label} page readable, no banner.", now)
+        _last_logged.pop(key, None)   # no banner any more: a later banner is news again
+        return ""
+    for doc, hit in zip(docs, hits):
+        if hit is None:
+            continue
+        banner_element, phrase, button = hit
+        if doc.FindFirst(auto.TreeScope.Descendants, conds["limit"]) is not None:
+            log_changed(key, f"{label} banner '{phrase}' found, but the limit is still active on this page -> not pressing.", now)
+            return ""
+        found = find_button_near_banner(uia, banner_element, conds, button)
+        if not found:
+            log_changed(key, f"{label} banner '{phrase}' found, but no button named exactly '{button}' next to it -> not pressing.", now)
+            return ""
+        element = found[0]
+        several = "" if len(found) == 1 else f" ({len(found)} buttons have that name; the first is used)"
+        allowed, reason = decide_press(history.get(key, []), now)
+        if not allowed:
+            log_changed(key, f"{label} '{button}' button present -> not pressing: {reason}.{several}", now)
+            return ""
+        control = safe(lambda: button_control(element))
+        supported = has_invoke(control)
+        where = rect_text(element)
+        if DRY_RUN:
+            # A dry run presses nothing, so it must not count as a press either (it would block the real one later).
+            log_changed(key, f"{label} DRY-RUN: would press '{button}' under '{phrase}' ({reason}; Invoke supported: "
+                             f"{'yes' if supported else 'NO'}; {where}){several}", now)
+            return ""
+        if not supported:
+            log_changed(key, f"{label} '{button}' button found but it offers no Invoke action -> cannot press ({where}).", now)
+            return ""
+        done, info = press(control)
+        if done:
+            history.setdefault(key, []).append(now)
+            save_state()
+            if tag != "tab":   # a chat continued in another TAB keeps running in the background; no hold needed
+                _hold_until[hwnd] = now + timedelta(minutes=HOLD_AFTER_PRESS_MINUTES)
+        log_changed(key, f"{label} '{button}' under '{phrase}': {info} ({reason}; {where}){several}", now)
+        return "pressed" if done else ""
+    return ""
+
+
+# ---------- visiting the other tabs and the sidebar chats ----------
+
+_next_visit = {}        # window -> time of the next visit round
+_sidebar_warned = set()
+
+def list_tabs(root, conds):
+    found = root.FindAll(auto.TreeScope.Descendants, conds["tab"])
+    tabs = []
+    if found is None:
+        return tabs
+    for i in range(found.Length):
+        element = found.GetElement(i)
+        name = safe(lambda: element.CurrentName, "") or ""
+        control = control_of(element)
+        pattern = safe(lambda: control.GetSelectionItemPattern())
+        selected = bool(safe(lambda: pattern.IsSelected, False)) if pattern is not None else False
+        tabs.append({"element": element, "name": name, "selected": selected, "selectable": pattern is not None})
+    return tabs
+
+def select_element(element):
+    """Switches to a tab through the UI Automation Select action (no mouse, no keyboard, no focus change)."""
+    control = control_of(element)
+    pattern = safe(lambda: control.GetSelectionItemPattern())
+    if pattern is None:
+        return False
+    try:
+        try:
+            pattern.Select(waitTime=0)
+        except TypeError:
+            pattern.Select()
+        return True
+    except Exception:
+        return False
+
+def invoke_element(element):
+    control = control_of(element)
+    if control is None:
+        return False
+    done, _info = press(control)
+    return done
+
+def sidebar_links(uia, conds, hwnd):
+    """{chat id: (name, element)} of the chat links in the window, in page order."""
+    root = uia.ElementFromHandle(hwnd)
+    out = {}
+    if root is None:
+        return out
+    links = root.FindAll(auto.TreeScope.Descendants, conds["link"])
+    if links is None:
+        return out
+    for i in range(min(links.Length, MAX_LINKS_SCANNED)):
+        element = links.GetElement(i)
+        chat = chat_id_from_url(element_value(element))
+        if chat and chat not in out:
+            out[chat] = (short(safe(lambda: element.CurrentName, ""), 40), element)
+    return out
+
+def current_chat_id(uia, conds, hwnd):
+    root = uia.ElementFromHandle(hwnd)
+    if root is None:
+        return ""
+    for doc in page_documents(root, conds):
+        chat = chat_id_from_url(element_value(doc))
+        if chat:
+            return chat
+    return ""
+
+def wait_for_page(uia, conds, hwnd, expect_chat=None):
+    """Waits until the page that was just brought up is readable (and, for a chat, shows that chat)."""
+    time.sleep(MIN_SETTLE_SECONDS)
+    end = time.time() + PAGE_SETTLE_SECONDS
+    while True:
+        root = safe(lambda: uia.ElementFromHandle(hwnd))
+        docs = page_documents(root, conds) if root is not None else []
+        ready = any(page_is_readable(uia, d) for d in docs)
+        if ready and expect_chat:
+            ready = any(chat_id_from_url(element_value(d)) == expect_chat for d in docs)
+        if ready:
+            time.sleep(BANNER_RENDER_SECONDS)
+            return True
+        if time.time() >= end:
+            return False
+        time.sleep(0.5)
+
+def visit_window(uia, conds, hwnd, title, now):
+    """One visit round of one window: every other Claude tab, then the sidebar chats, then back to where it was.
+    Skipped while the user works in that window, while it is minimized, right after a press and between rounds."""
+    if not (VISIT_TABS or VISIT_SIDEBAR):
+        return
+    hold = _hold_until.get(hwnd)
+    if hold is not None and now < hold:
+        return
+    due = _next_visit.get(hwnd)
+    if due is not None and now < due:
+        return
+    if user32.IsIconic(hwnd) or user32.GetForegroundWindow() == hwnd:
+        return   # frozen page, or the user is working in this window right now
+    _next_visit[hwnd] = now + timedelta(minutes=VISIT_EVERY_MINUTES)
+    label = f"[window {hwnd} '{short(title, 50)}']"
     root = uia.ElementFromHandle(hwnd)
     if root is None:
         return
-    hit = banner_hit(root, conds)
-    if hit is None:
-        _last_logged.pop(key, None)   # nothing on the page any more: a later banner is news again
-        return
-    phrase, button = hit
-    label = f"[window {hwnd} '{short(title, 50)}']"
-    if root.FindFirst(auto.TreeScope.Descendants, conds["limit"]) is not None:
-        log_changed(key, f"{label} banner '{phrase}' found, but the limit is still active on this page -> not pressing.", now)
-        return
-    found = root.FindAll(auto.TreeScope.Descendants, conds["button"][button])
-    if found is None or found.Length == 0:
-        log_changed(key, f"{label} banner '{phrase}' found, but no button named exactly '{button}' -> not pressing.", now)
-        return
-    element = found.GetElement(0)
-    several = "" if found.Length == 1 else f" ({found.Length} buttons have that name; the first is used)"
-    allowed, reason = decide_press(history.get(key, []), now)
-    if not allowed:
-        log_changed(key, f"{label} '{button}' button present -> not pressing: {reason}.{several}", now)
-        return
-    control = safe(lambda: button_control(element))
-    supported = has_invoke(control)
-    where = rect_text(element)
-    if DRY_RUN:
-        history.setdefault(key, []).append(now)
-        save_state()
-        log_changed(key, f"{label} DRY-RUN: would press '{button}' under '{phrase}' ({reason}; Invoke supported: "
-                         f"{'yes' if supported else 'NO'}; {where}){several}", now)
-        return
-    if not supported:
-        log_changed(key, f"{label} '{button}' button found but it offers no Invoke action -> cannot press ({where}).", now)
-        return
-    done, info = press(control)
-    if done:
-        history.setdefault(key, []).append(now)
-        save_state()
-    log_changed(key, f"{label} '{button}' under '{phrase}': {info} ({reason}; {where}){several}", now)
+    started = time.time()
+    stats = {"tabs": 0, "chats": 0, "pressed": 0}
+
+    def stop_now():
+        return time.time() - started > MAX_VISIT_SECONDS or user32.GetForegroundWindow() == hwnd
+
+    # --- other tabs ---
+    tabs = list_tabs(root, conds) if VISIT_TABS else []
+    original = next((t for t in tabs if t["selected"]), None)
+    others = [t for t in tabs if t is not original and t["selectable"] and "claude" in t["name"].casefold()]
+    moved_tab = False
+    for tab in others:
+        if stop_now():
+            break
+        if not select_element(tab["element"]):
+            continue
+        moved_tab = True
+        wait_for_page(uia, conds, hwnd)
+        stats["tabs"] += 1
+        if handle_window(uia, conds, hwnd, window_title(hwnd), datetime.now(), tag="tab") == "pressed":
+            stats["pressed"] += 1
+    if moved_tab and original is not None:
+        select_element(original["element"])
+        time.sleep(0.5)
+
+    # --- sidebar chats (in the tab that was in front) ---
+    if VISIT_SIDEBAR and not stop_now() and not on_hold(hwnd):
+        links = sidebar_links(uia, conds, hwnd)
+        if not links:
+            if hwnd not in _sidebar_warned:
+                _sidebar_warned.add(hwnd)
+                log(f"{label} no chat links with a readable address found in the sidebar -> sidebar chats are not visited in this window.")
+        else:
+            original_chat = current_chat_id(uia, conds, hwnd)
+            targets = [c for c in links if c != original_chat][:MAX_CHATS_PER_ROUND]
+            moved_chat = False
+            stayed = False
+            for chat in targets:
+                if stop_now():
+                    break
+                fresh = sidebar_links(uia, conds, hwnd).get(chat)   # the sidebar is redrawn after every switch
+                if fresh is None or not invoke_element(fresh[1]):
+                    continue
+                moved_chat = True
+                wait_for_page(uia, conds, hwnd, expect_chat=chat)
+                stats["chats"] += 1
+                if handle_window(uia, conds, hwnd, window_title(hwnd), datetime.now(), tag="sidebar") == "pressed":
+                    stats["pressed"] += 1
+                    stayed = True   # stay on this chat: it is running again (the window is on hold for a while)
+                    break
+            if moved_chat and not stayed and original_chat:
+                back = sidebar_links(uia, conds, hwnd).get(original_chat)
+                if back is not None and invoke_element(back[1]):
+                    wait_for_page(uia, conds, hwnd, expect_chat=original_chat)
+    log_changed(f"visit|{hwnd}", f"{label} visit round: {stats['tabs']} other tab(s) and {stats['chats']} sidebar chat(s) "
+                                 f"looked at, {stats['pressed']} pressed.", datetime.now())
+
+def on_hold(hwnd):
+    """A press (also one in another tab) puts the window on hold, so no chat switching follows."""
+    hold = _hold_until.get(hwnd)
+    return hold is not None and datetime.now() < hold
 
 def list_sidebar_chats(uia, conds, hwnd, title, now):
     """Information only: writes the chats of the sidebar to the log (every SIDEBAR_LIST_EVERY_MINUTES).
@@ -433,16 +690,58 @@ def check_everything(uia, conds):
             handle_window(uia, conds, hwnd, title, now)
             if LIST_SIDEBAR_CHATS:
                 list_sidebar_chats(uia, conds, hwnd, title, now)
+            visit_window(uia, conds, hwnd, title, datetime.now())
         except Exception as exc:
             log_changed(f"error|{hwnd}", f"[window {hwnd}] could not be checked: {exc}", now)
         time.sleep(WINDOW_GAP_SECONDS)
 
+AWAKE_CHROME_FLAGS = ("--disable-features=CalculateNativeWinOcclusion", "--disable-backgrounding-occluded-windows")
+
+def awake_flags_status():
+    """'active' when the running Chrome was started with the switches that stop it from freezing covered windows."""
+    saw_browser = False
+    for p in psutil.process_iter(["name", "cmdline", "exe"]):
+        try:
+            if (p.info.get("name") or "").lower() != "chrome.exe" or not is_target_executable(p.info.get("exe")):
+                continue
+            args = p.info.get("cmdline") or []
+            if any(a.startswith("--type=") for a in args):
+                continue
+            saw_browser = True
+            if all(flag in args for flag in AWAKE_CHROME_FLAGS):
+                return "active"
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return "inactive" if saw_browser else "no-chrome"
+
+def ensure_single_instance():
+    """Two copies would press the same button twice; the second one stops here."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    handle = kernel32.CreateMutexW(None, False, "Local\\ClaudeAutoContinueSingleInstance")
+    if ctypes.get_last_error() == 183:   # ERROR_ALREADY_EXISTS
+        print("Claude Auto Continue is already running in another window. Close that one first (or use Stop_All.bat).")
+        input("\nPress Enter to exit...")
+        raise SystemExit(1)
+    return handle
+
+_instance_mutex = None
+
 def main():
+    global _instance_mutex
+    _instance_mutex = ensure_single_instance()
     prune_log(force=True)
     log("=" * 64)
     log(f"{PROJECT_NAME} v{VERSION} -- started. mode={'DRY-RUN (nothing is pressed)' if DRY_RUN else 'PRESSING'} "
         f"interval={SCAN_INTERVAL_SECONDS}s gap={MIN_GAP_MINUTES}min max_per_hour={MAX_PRESSES_PER_HOUR}")
     load_state()
+    status = awake_flags_status()
+    if status == "active":
+        log("Covered-window protection: ACTIVE (Chrome was started with the keep-awake switches).")
+    elif status == "inactive":
+        log("WARNING: Chrome was started WITHOUT the keep-awake switches. Windows hidden behind other windows or "
+            "minimized are frozen by Chrome and CANNOT be read, so only the visible window works. Fix: close ALL Chrome "
+            "windows (also the background Chrome in the tray), then start Chrome_Opener.bat again.")
     uia = auto.AutomationClient.instance().IUIAutomation
     conds = build_conditions(uia)
     print("\nWatching Claude windows. Press Ctrl+C to stop.\n")

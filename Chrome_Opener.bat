@@ -40,4 +40,5 @@ if errorlevel 1 (
 
 py "%~dp0Chrome_Opener.py"
 
+pause
 endlocal

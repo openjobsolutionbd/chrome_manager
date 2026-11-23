@@ -1,6 +1,6 @@
 # Claude Auto Continue
 
-Version 0.2.0 (history in `CHANGELOG.md`). Status: development, dry run. It does not click anything yet; it only logs what it would press.
+Version 0.3.1 (history in `CHANGELOG.md`). Status: it presses the button (`DRY_RUN = False` in `Claude_Auto_Continue.py`; set it to `True` for a dry run that only logs). It also visits the other tabs and the sidebar chats of every profile window.
 
 ## Goal
 When a Claude chat stops because the free usage limit was reached, claude.ai shows a banner with a button. Two forms are known:

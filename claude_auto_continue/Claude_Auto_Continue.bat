@@ -34,4 +34,5 @@ if errorlevel 1 (
 
 py "%~dp0Claude_Auto_Continue.py"
 
+pause
 endlocal

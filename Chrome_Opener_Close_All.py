@@ -83,8 +83,10 @@ for round_num in range(1, CONFIRM_ROUNDS + 1):
     for hwnd in chrome_windows():
         user32.SetForegroundWindow(hwnd)
         time.sleep(0.05)
-        user32.keybd_event(0x0D, 0, 0, 0)
-        user32.keybd_event(0x0D, 0, 2, 0)
+        # Enter only when this window really is in front; otherwise the key would go into another program.
+        if user32.GetForegroundWindow() == hwnd:
+            user32.keybd_event(0x0D, 0, 0, 0)
+            user32.keybd_event(0x0D, 0, 2, 0)
         time.sleep(0.1)
 
 remaining = chrome_windows()
