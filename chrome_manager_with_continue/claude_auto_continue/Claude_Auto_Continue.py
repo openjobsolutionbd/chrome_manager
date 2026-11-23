@@ -30,9 +30,25 @@ except ImportError:
     input("\nPress Enter to exit...")
     raise SystemExit(1)
 
+# --- works with different uiautomation versions ---
+# Newer versions call the client class "_AutomationClient", have no "TreeScope" class and offer
+# CreateControlFromElement only as Control.CreateControlFromElement. The old names are tried as well.
+TREE_DESCENDANTS = 4   # the UI Automation constant TreeScope_Descendants
+
+def get_uia():
+    for name in ("_AutomationClient", "AutomationClient"):
+        client = getattr(auto, name, None)
+        if client is not None:
+            return client.instance().IUIAutomation
+    raise RuntimeError("This version of uiautomation is not supported. Run: py -m pip install --upgrade uiautomation")
+
+def create_control(element):
+    maker = getattr(auto, "CreateControlFromElement", None) or auto.Control.CreateControlFromElement
+    return maker(element)
+
 # Project version (see CHANGELOG.md). Bump with every merged change to this project.
 # Claude_Auto_Continue_Inspect.py carries the same number; keep both equal.
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 PROJECT_NAME = "Claude Auto Continue"
 
 DRY_RUN = False                   # True: only log what would be pressed. False: really press the button.
@@ -337,7 +353,7 @@ def build_conditions(uia):
 def page_documents(root, conds):
     """The web page(s) of the window (UI Automation Document nodes). Everything is searched INSIDE them, never in
     Chrome's own toolbar / tab strip, so a tab title or bookmark can not be mistaken for the banner."""
-    docs = root.FindAll(auto.TreeScope.Descendants, conds["document"])
+    docs = root.FindAll(TREE_DESCENDANTS, conds["document"])
     if docs is None:
         return []
     return [docs.GetElement(i) for i in range(docs.Length)]
@@ -352,10 +368,10 @@ def page_is_readable(uia, doc):
 
 def banner_hit(doc, conds):
     """(banner element, banner text, its button name) when a known banner is on the page, else None."""
-    if doc.FindFirst(auto.TreeScope.Descendants, conds["any_banner"]) is None:
+    if doc.FindFirst(TREE_DESCENDANTS, conds["any_banner"]) is None:
         return None
     for phrase, button in BANNERS:
-        element = doc.FindFirst(auto.TreeScope.Descendants, conds["banner"][phrase])
+        element = doc.FindFirst(TREE_DESCENDANTS, conds["banner"][phrase])
         if element is not None:
             return element, phrase, button
     return None
@@ -372,13 +388,13 @@ def find_button_near_banner(uia, banner_element, conds, button):
             return []
         if not node:
             return []
-        found = node.FindAll(auto.TreeScope.Descendants, conds["button"][button])
+        found = node.FindAll(TREE_DESCENDANTS, conds["button"][button])
         if found is not None and found.Length > 0:
             return [found.GetElement(i) for i in range(found.Length)]
     return []
 
 def button_control(element):
-    return auto.CreateControlFromElement(element)
+    return create_control(element)
 
 def has_invoke(control):
     return control is not None and safe(lambda: control.GetInvokePattern()) is not None
@@ -404,7 +420,7 @@ def rect_text(element):
     return safe(get, "position unknown")
 
 def control_of(element):
-    return safe(lambda: auto.CreateControlFromElement(element))
+    return safe(lambda: create_control(element))
 
 def element_value(element):
     """The 'value' Chrome gives an element: for a link its address, for the page Document its address."""
@@ -457,7 +473,7 @@ def handle_window(uia, conds, hwnd, title, now, tag=None):
         if hit is None:
             continue
         banner_element, phrase, button = hit
-        if doc.FindFirst(auto.TreeScope.Descendants, conds["limit"]) is not None:
+        if doc.FindFirst(TREE_DESCENDANTS, conds["limit"]) is not None:
             log_changed(key, f"{label} banner '{phrase}' found, but the limit is still active on this page -> not pressing.", now)
             return ""
         found = find_button_near_banner(uia, banner_element, conds, button)
@@ -498,7 +514,7 @@ _next_visit = {}        # window -> time of the next visit round
 _sidebar_warned = set()
 
 def list_tabs(root, conds):
-    found = root.FindAll(auto.TreeScope.Descendants, conds["tab"])
+    found = root.FindAll(TREE_DESCENDANTS, conds["tab"])
     tabs = []
     if found is None:
         return tabs
@@ -539,7 +555,7 @@ def sidebar_links(uia, conds, hwnd):
     out = {}
     if root is None:
         return out
-    links = root.FindAll(auto.TreeScope.Descendants, conds["link"])
+    links = root.FindAll(TREE_DESCENDANTS, conds["link"])
     if links is None:
         return out
     for i in range(min(links.Length, MAX_LINKS_SCANNED)):
@@ -666,7 +682,7 @@ def list_sidebar_chats(uia, conds, hwnd, title, now):
     root = uia.ElementFromHandle(hwnd)
     if root is None:
         return
-    links = root.FindAll(auto.TreeScope.Descendants, conds["link"])
+    links = root.FindAll(TREE_DESCENDANTS, conds["link"])
     total = 0 if links is None else links.Length
     names = []
     for i in range(min(total, MAX_LINKS_SCANNED)):
@@ -742,7 +758,7 @@ def main():
         log("WARNING: Chrome was started WITHOUT the keep-awake switches. Windows hidden behind other windows or "
             "minimized are frozen by Chrome and CANNOT be read, so only the visible window works. Fix: close ALL Chrome "
             "windows (also the background Chrome in the tray), then start Chrome_Opener.bat again.")
-    uia = auto.AutomationClient.instance().IUIAutomation
+    uia = get_uia()
     conds = build_conditions(uia)
     print("\nWatching Claude windows. Press Ctrl+C to stop.\n")
     try:
