@@ -4,8 +4,7 @@
 const CLAUDE_URL_PATTERN = "https://claude.ai/*";
 const CLAUDE_URL_PREFIX = "https://claude.ai/";
 const BATCH_KEY = "batchScan";
-const AUTO_SCAN_KEY = "autoScannedTabs";
-const AUTO_SCAN_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+const justReloadedTabs = new Map(); // tabId -> time of the reload this extension made
 const processingTabs = new Set();
 const autoStartingTabs = new Set();
 
@@ -105,25 +104,15 @@ async function startBatchScan() {
 
 async function maybeAutoStartForTab(tab) {
   if (!tab || !Number.isInteger(tab.id) || !tab.active || !isClaudeUrl(tab.url)) return;
+  // The reload we make at the end of a scan must not start another scan.
+  const reloadedAt = justReloadedTabs.get(tab.id);
+  if (reloadedAt && Date.now() - reloadedAt < 60 * 1000) return;
   if (autoStartingTabs.has(tab.id)) return;
   autoStartingTabs.add(tab.id);
   try {
     const currentBatch = await getBatch();
     if (currentBatch && currentBatch.scannerTabId) return;
-
-    const data = await chrome.storage.local.get({ [AUTO_SCAN_KEY]: {} });
-    const seen = data[AUTO_SCAN_KEY] && typeof data[AUTO_SCAN_KEY] === "object" ? data[AUTO_SCAN_KEY] : {};
-    const lastStarted = Number(seen[String(tab.id)] || 0);
-    if (Date.now() - lastStarted < AUTO_SCAN_COOLDOWN_MS) return;
-
-    // Mark before starting so repeated tab events cannot create duplicate scanners.
-    seen[String(tab.id)] = Date.now();
-    await chrome.storage.local.set({ [AUTO_SCAN_KEY]: seen });
-    const result = await startBatchScanForTab(tab);
-    if (!result.ok) {
-      delete seen[String(tab.id)];
-      await chrome.storage.local.set({ [AUTO_SCAN_KEY]: seen });
-    }
+    await startBatchScanForTab(tab);
   } finally {
     autoStartingTabs.delete(tab.id);
   }
@@ -158,6 +147,7 @@ async function finishBatch(message, status = "Sidebar scan complete") {
     try { await chrome.tabs.remove(batch.scannerTabId); } catch (_) {}
   }
   if (status === "Sidebar scan complete" && Number.isInteger(batch.sourceTabId)) {
+    justReloadedTabs.set(batch.sourceTabId, Date.now());
     try { await chrome.tabs.reload(batch.sourceTabId); } catch (_) {}
   }
 }
