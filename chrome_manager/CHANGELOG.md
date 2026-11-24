@@ -1,6 +1,6 @@
 # Chrome Manager - changelog
 
-This is the changelog of the project "Chrome Manager" (repository root). The version with the "Continue" button presser is in the separate folder `chrome_manager_with_continue`.
+This is the changelog of the project "Chrome Manager" (repository root). The "Continue" button presser is the Chrome extension in the separate folder `claude_background_continue`.
 
 Version number is `VERSION` in `Chrome_Opener.py`. It is printed at the start of every session in `activity_log.txt`
 (`... LIMIT WATCHER vX.Y.Z -- session started`), so a log line can always be matched to a version.
@@ -11,6 +11,9 @@ Changes that do not alter the tools' behaviour (documentation, the other project
 
 Known limit: the log keeps only 3 days. If one session runs longer than 3 days, its start line (and so its version)
 is cleaned out of the log. Only `Chrome_Opener.py` carries the version; the other scripts do not write to the log.
+
+## 1.3.1
+- At most 10 profiles are open at the same time (was 7): `MAX_CONCURRENT_PROFILES`.
 
 ## 1.3.0
 Fixes found in a code review (not yet tried on real Windows):
