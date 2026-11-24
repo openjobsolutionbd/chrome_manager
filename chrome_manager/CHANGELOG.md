@@ -13,7 +13,7 @@ Known limit: the log keeps only 3 days. If one session runs longer than 3 days, 
 is cleaned out of the log. Only `Chrome_Opener.py` carries the version; the other scripts do not write to the log.
 
 ## 1.3.2
-- All profiles (up to 35) may be open at the same time (was 10), so profiles without a limit can not keep the others from opening. The CPU/RAM safety pause for new launches stays.
+- All profiles (up to 35) may be open at the same time (was 10), so profiles without a limit can not keep the others from opening. The CPU/RAM safety pause for new launches stays, now at CPU 80% / RAM 90% (was 65% / 80%).
 
 ## 1.3.1
 - At most 10 profiles are open at the same time (was 7): `MAX_CONCURRENT_PROFILES`.

@@ -96,8 +96,8 @@ HIDE_UNTIL_LOADED = True  # set False for the old behaviour (shown again right a
 HIDE_MAX_SECONDS = 20.0   # never keep a window invisible longer than this
 
 # Smart launch protection: defer new launches when the PC is under load.
-SAFE_CPU_PERCENT = 65.0
-SAFE_RAM_PERCENT = 80.0
+SAFE_CPU_PERCENT = 80.0
+SAFE_RAM_PERCENT = 90.0
 RESOURCE_SAMPLE_SECONDS = 0.25
 RESOURCE_LOG_INTERVAL_SECONDS = 30
 END_PASS_RETRY_DELAY_SECONDS = 5  # one final retry after the normal profile scan
