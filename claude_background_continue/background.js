@@ -146,7 +146,7 @@ async function finishBatch(message, status = "Sidebar scan complete") {
   if (Number.isInteger(batch.scannerTabId)) {
     try { await chrome.tabs.remove(batch.scannerTabId); } catch (_) {}
   }
-  if (status === "Sidebar scan complete" && Number.isInteger(batch.sourceTabId)) {
+  if (status === "Sidebar scan complete" && batch.clickedAny && Number.isInteger(batch.sourceTabId)) {
     justReloadedTabs.set(batch.sourceTabId, Date.now());
     try { await chrome.tabs.reload(batch.sourceTabId); } catch (_) {}
   }
@@ -222,8 +222,11 @@ async function handleChatResult(tabId, response) {
     );
   }
 
+  if (result.found && result.clicked) batch.clickedAny = true;
+
   batch.index += 1;
   if (batch.index >= total) {
+    await setBatch(batch);
     await finishBatch(`Finished checking ${total} sidebar chat(s).`);
   } else {
     batch.phase = "navigate";

@@ -26,10 +26,10 @@ except ImportError:
     raise SystemExit(1)
 
 # Tool version (see CHANGELOG.md). Bump this with every change that is merged.
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 
 MAX_PROFILES = 35
-MAX_CONCURRENT_PROFILES = 10   # never more than this many open at the same time
+MAX_CONCURRENT_PROFILES = 35   # never more than this many open at the same time
 MAX_WAIT_FOR_WINDOW = 20  # only wait for the OS window; page verification runs in the watcher
 CHECK_INTERVAL_SECONDS = 0.5
 TARGET_URL = "https://claude.ai/new"
@@ -96,8 +96,8 @@ HIDE_UNTIL_LOADED = True  # set False for the old behaviour (shown again right a
 HIDE_MAX_SECONDS = 20.0   # never keep a window invisible longer than this
 
 # Smart launch protection: defer new launches when the PC is under load.
-SAFE_CPU_PERCENT = 65.0
-SAFE_RAM_PERCENT = 80.0
+SAFE_CPU_PERCENT = 80.0
+SAFE_RAM_PERCENT = 90.0
 RESOURCE_SAMPLE_SECONDS = 0.25
 RESOURCE_LOG_INTERVAL_SECONDS = 30
 END_PASS_RETRY_DELAY_SECONDS = 5  # one final retry after the normal profile scan

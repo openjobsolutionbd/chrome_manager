@@ -11,7 +11,8 @@ WHAT'S NEW
 - Automatically attempts the matching Continue or Try again action when a usage-limit
   notice and its associated button are detected.
 - Includes Stop, progress status, and per-chat log entries.
-- When the scan of all sidebar chats is finished, the original Claude tab is reloaded once.
+- When the scan of all sidebar chats is finished, the original Claude tab is reloaded once,
+  but only if at least one Continue / Try again was clicked during the scan.
 
 INSTALL / UPDATE
 1. Extract this ZIP into a new folder.
