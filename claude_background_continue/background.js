@@ -5,7 +5,7 @@ const CLAUDE_URL_PATTERN = "https://claude.ai/*";
 const CLAUDE_URL_PREFIX = "https://claude.ai/";
 const BATCH_KEY = "batchScan";
 const AUTO_SCAN_KEY = "autoScannedTabs";
-const AUTO_SCAN_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+const AUTO_SCAN_COOLDOWN_MS = 5 * 60 * 60 * 1000;
 const processingTabs = new Set();
 const autoStartingTabs = new Set();
 

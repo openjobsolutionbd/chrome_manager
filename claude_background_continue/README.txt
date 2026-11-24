@@ -24,7 +24,7 @@ INSTALL / UPDATE
 
 HOW SIDEBAR SCANNING STARTS
 - The extension starts a sidebar scan automatically when a Claude tab is opened or
-  selected, at most once per tab every 12 hours.
+  selected, at most once per tab every 5 hours.
 - To run it again manually, click the extension icon and choose "Scan all sidebar chats".
 - The extension opens a separate inactive tab, gathers chat links it can access from
   the sidebar, and visits those chats in sequence. Your current chat stays open.
