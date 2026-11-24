@@ -1,7 +1,7 @@
 # chrome_manager
 
 Chrome Manager (Windows). Opens many Chrome profiles on claude.ai/new, detects the free-limit message, closes the window and reopens it
-at the reset time. It does NOT press "Continue" -- for that use the separate folder `chrome_manager_with_continue`.
+at the reset time. It does NOT press "Continue" -- for that use the Chrome extension in the folder `claude_background_continue`.
 
 | File | What it does |
 |---|---|

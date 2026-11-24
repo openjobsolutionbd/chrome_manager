@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font: 13px system-ui, sans-serif;
+      width: 390px;
+      padding: 10px;
+      box-sizing: border-box;
+      background: #f4f4f5;
+      color: #333;
+    }
+    h3 { margin: 0 0 9px; font-size: 14px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 7px; }
+    button {
+      padding: 7px 9px;
+      cursor: pointer;
+      margin-bottom: 8px;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    #status { font-size: 11px; color: #444; margin: 1px 0 8px; line-height: 1.45; }
+    #hint { font-size: 11px; color: #666; margin: 0 0 8px; line-height: 1.4; }
+    #log {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 11px;
+      max-height: 350px;
+      overflow-y: auto;
+      background: #fff;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h3>Claude Background Continue 1.5.0</h3>
+  <div class="actions">
+    <button id="batch" type="button">Scan all sidebar chats</button>
+    <button id="stop" type="button" disabled>Stop</button>
+    <button id="scan" type="button">Rescan this chat</button>
+    <button id="clear" type="button">Clear Log</button>
+  </div>
+  <div id="status" role="status">Automatic scanning is enabled for Claude tabs.</div>
+  <div id="hint">On opening a Claude tab, the extension starts a sidebar scan automatically (once per tab). It uses a separate inactive tab, so your current chat stays open. Matching Continue / Try again actions are clicked automatically.</div>
+  <div id="log">(loading)</div>
+  <script src="popup.js"></script>
+</body>
+</html>

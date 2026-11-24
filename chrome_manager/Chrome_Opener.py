@@ -26,10 +26,10 @@ except ImportError:
     raise SystemExit(1)
 
 # Tool version (see CHANGELOG.md). Bump this with every change that is merged.
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 MAX_PROFILES = 35
-MAX_CONCURRENT_PROFILES = 7    # never more than this many open at the same time
+MAX_CONCURRENT_PROFILES = 10   # never more than this many open at the same time
 MAX_WAIT_FOR_WINDOW = 20  # only wait for the OS window; page verification runs in the watcher
 CHECK_INTERVAL_SECONDS = 0.5
 TARGET_URL = "https://claude.ai/new"

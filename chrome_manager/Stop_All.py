@@ -1,5 +1,5 @@
 """Stop_All -- one click stops everything that Start_All.bat started:
-1. Chrome_Opener and Claude Auto Continue (and their console windows), so nothing reopens the windows;
+1. Chrome_Opener (and its console window), so nothing reopens the windows;
 2. every window of the targeted Google Chrome (politely, like the X button; no keys are sent).
 If a window stays open (a "Leave site?" question is waiting), it is reported and left for you."""
 import ctypes
@@ -100,7 +100,7 @@ def chrome_windows():
 
 def main():
     print("=" * 60)
-    print("   STOP ALL (Chrome Opener + Claude Auto Continue + Chrome)")
+    print("   STOP ALL (Chrome Opener + Chrome)")
     print("=" * 60)
     count = stop(tool_processes())
     print(f"Stopped {count} tool process(es)." if count else "The tools were not running.")
