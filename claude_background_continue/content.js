@@ -1,12 +1,13 @@
-// Claude Background Continue v1.5.0
-// Watches the current chat and supports sequential inspection of sidebar chats.
+// Claude Background Continue v2.0.0 -- page helper.
+//
+// This file does nothing by itself: no timers, no observers, no clicks of its own.
+// background.js injects it into a Claude tab and then calls the functions below, one short
+// synchronous call at a time. All waiting happens in background.js, because a page in a
+// minimized or background window is "hidden" and Chrome slows down its timers.
 
 (() => {
-  const INSTANCE_KEY = "__claudeBackgroundContinueV15";
-  if (globalThis[INSTANCE_KEY]) {
-    globalThis[INSTANCE_KEY].scan();
-    return;
-  }
+  const VERSION = "2.0.0";
+  if (globalThis.__cbc && globalThis.__cbc.version === VERSION) return;
 
   const ACTION_SELECTOR = "button, [role='button'], a, input[type='button'], input[type='submit']";
   const LIMIT_MARKERS = [
@@ -18,23 +19,13 @@
     "free messages return"
   ];
 
-  const clickedButtons = new WeakSet();
-  const pendingButtons = new WeakSet();
-  let scanQueued = false;
-  let lastDiagnosticKey = "";
-  let lastActionForPage = null;
-
   const normalize = value => String(value || "")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[​-‍﻿]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
 
   const visibleText = element => normalize(element?.innerText || element?.textContent || "");
-
-  function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 
   function isVisible(element) {
     if (!element || !element.isConnected) return false;
@@ -63,6 +54,8 @@
     return LIMIT_MARKERS.some(marker => text.includes(normalize(marker)));
   }
 
+  // The closest visible block around the button that mentions a usage limit. A "Continue"
+  // button with no limit notice around it (for example inside a code answer) is ignored.
   function findNearestLimitContext(button) {
     let current = button.parentElement;
     let depth = 1;
@@ -81,33 +74,6 @@
     return best;
   }
 
-  function hasLimitNoticeOnPage() {
-    return containsLimitNotice(visibleText(document.body));
-  }
-
-  function sendLog(type, status, detail, buttonName = "") {
-    try {
-      const result = chrome.runtime.sendMessage({
-        type,
-        status,
-        detail,
-        button: buttonName,
-        url: location.href,
-        time: Date.now()
-      });
-      if (result && typeof result.catch === "function") result.catch(() => {});
-    } catch (_) {
-      // Ignore extension reload/shutdown races.
-    }
-  }
-
-  function reportOnce(status, detail, buttonName = "") {
-    const key = `${status}|${buttonName}|${detail}`;
-    if (key === lastDiagnosticKey) return;
-    lastDiagnosticKey = key;
-    sendLog("diagnostic", status, detail, buttonName);
-  }
-
   function findUsageLimitAction() {
     const candidates = [];
     for (const element of document.querySelectorAll(ACTION_SELECTOR)) {
@@ -123,71 +89,7 @@
     return candidates[0] || null;
   }
 
-  function attemptClick(hit) {
-    return new Promise(resolve => {
-      if (!hit || clickedButtons.has(hit.button)) {
-        resolve({ clicked: Boolean(hit && clickedButtons.has(hit.button)), alreadyHandled: true });
-        return;
-      }
-      if (pendingButtons.has(hit.button)) {
-        resolve({ clicked: false, pending: true });
-        return;
-      }
-      pendingButtons.add(hit.button);
-      window.setTimeout(() => {
-        pendingButtons.delete(hit.button);
-        if (!isVisible(hit.button) || hit.button.disabled || hit.button.getAttribute("aria-disabled") === "true") {
-          resolve({ clicked: false, stale: true });
-          return;
-        }
-        if (getActionName(hit.button) !== hit.buttonName) {
-          resolve({ clicked: false, stale: true });
-          return;
-        }
-        const currentHit = findUsageLimitAction();
-        if (!currentHit || currentHit.button !== hit.button || clickedButtons.has(hit.button)) {
-          resolve({ clicked: false, stale: true });
-          return;
-        }
-        clickedButtons.add(hit.button);
-        hit.button.click();
-        lastActionForPage = { buttonName: hit.buttonName, url: location.href, time: Date.now() };
-        sendLog(
-          "clicked",
-          "Click attempted",
-          `Clicked the "${hit.buttonName}" button associated with the usage-limit notice.`,
-          hit.buttonName
-        );
-        resolve({ clicked: true });
-      }, 450);
-    });
-  }
-
-  async function scanPage() {
-    const hit = findUsageLimitAction();
-    if (!hit) {
-      if (hasLimitNoticeOnPage()) {
-        reportOnce(
-          "Notice found, button not detected",
-          "Usage-limit text is visible, but no Continue or Try again button was found beside it."
-        );
-      } else {
-        lastDiagnosticKey = "";
-      }
-      return;
-    }
-    reportOnce("Button detected", `Found "${hit.buttonName}" beside a Claude usage-limit notice.`, hit.buttonName);
-    await attemptClick(hit);
-  }
-
-  function queueScan() {
-    if (scanQueued) return;
-    scanQueued = true;
-    window.setTimeout(() => {
-      scanQueued = false;
-      void scanPage();
-    }, 120);
-  }
+  // ---- sidebar ----
 
   function chatUrlFromAnchor(anchor) {
     try {
@@ -200,131 +102,102 @@
     }
   }
 
-  function collectChatLinks() {
-    const found = [];
+  function sidebarRoots() {
+    return [...document.querySelectorAll("aside, nav, [role='navigation']")];
+  }
+
+  function chatUrlsFrom(anchors) {
+    const urls = [];
     const seen = new Set();
-    for (const anchor of document.querySelectorAll("a[href]")) {
-      const rect = anchor.getBoundingClientRect();
-      // Chat links are normally in the left navigation/sidebar.
-      if (rect.width && rect.height && rect.left > Math.max(520, window.innerWidth * 0.55)) continue;
+    for (const anchor of anchors) {
       const url = chatUrlFromAnchor(anchor);
       if (url && !seen.has(url)) {
         seen.add(url);
-        found.push(url);
+        urls.push(url);
       }
     }
-    return found;
-  }
-
-  async function collectSidebarChatLinks() {
-    let urls = collectChatLinks();
-
-    // Claude's sidebar may collapse older chats behind a "View all" control.
-    const viewAll = [...document.querySelectorAll("button, a, [role='button']")]
-      .find(element => isVisible(element) && normalize(element.innerText || element.textContent) === "view all");
-    if (viewAll) {
-      viewAll.click();
-      await delay(900);
-      urls = collectChatLinks();
-    }
-
-    const sidebarRoots = [...document.querySelectorAll("aside, nav, [role='navigation']")];
-    const roots = sidebarRoots.length ? sidebarRoots : [document.body];
-    const scrollers = [];
-    for (const root of roots) {
-      for (const element of [root, ...root.querySelectorAll("*")]) {
-        const style = getComputedStyle(element);
-        const canScroll = element.scrollHeight > element.clientHeight + 40 &&
-          /(auto|scroll)/.test(`${style.overflowY} ${style.overflow}`);
-        if (canScroll && !scrollers.includes(element)) scrollers.push(element);
-      }
-    }
-
-    const originalPositions = scrollers.map(element => [element, element.scrollTop]);
-    const maxRounds = 18;
-    for (const scroller of scrollers) {
-      for (let round = 0; round < maxRounds; round += 1) {
-        const before = scroller.scrollTop;
-        scroller.scrollTop = Math.min(scroller.scrollHeight, before + Math.max(180, scroller.clientHeight * 0.8));
-        await delay(180);
-        const newlyFound = collectChatLinks();
-        const known = new Set(urls);
-        for (const url of newlyFound) if (!known.has(url)) urls.push(url);
-        if (scroller.scrollTop === before || scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) break;
-      }
-    }
-    for (const [element, position] of originalPositions) element.scrollTop = position;
-
-    // Include any links which became visible during scrolling, preserving first-seen order.
-    const finalLinks = collectChatLinks();
-    const known = new Set(urls);
-    for (const url of finalLinks) if (!known.has(url)) urls.push(url);
     return urls;
   }
 
-  async function inspectBatchChat() {
-    // Automatic page scanning may already have clicked the button while this tab loaded.
-    await delay(250);
-    const hit = findUsageLimitAction();
-    if (hit) {
-      reportOnce("Button detected", `Found "${hit.buttonName}" beside a Claude usage-limit notice.`, hit.buttonName);
-      const clickResult = await attemptClick(hit);
-      return {
-        found: true,
-        buttonName: hit.buttonName,
-        clicked: Boolean(clickResult.clicked || clickedButtons.has(hit.button)),
-        detail: clickResult.alreadyHandled ? "The action was already handled by the automatic page scanner." : "Usage-limit action inspected."
-      };
-    }
+  // Chat links in the sidebar, in page order. Visibility is not required, so a sidebar that
+  // is collapsed (for example because the window is small or minimized) still gives its links.
+  function collectLinks() {
+    const inSidebar = [];
+    for (const root of sidebarRoots()) inSidebar.push(...root.querySelectorAll("a[href]"));
+    const urls = chatUrlsFrom(inSidebar);
+    if (urls.length) return urls;
 
-    if (lastActionForPage && lastActionForPage.url === location.href && Date.now() - lastActionForPage.time < 15000) {
-      return {
-        found: true,
-        buttonName: lastActionForPage.buttonName,
-        clicked: true,
-        detail: "The automatic page scanner already clicked this action."
-      };
-    }
-
-    if (hasLimitNoticeOnPage()) {
-      return {
-        found: false,
-        detail: "A usage-limit notice was visible, but no matching Continue or Try again action was found."
-      };
-    }
-    return { found: false, detail: "No usage-limit action found." };
-  }
-
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message || typeof message.type !== "string") return;
-
-    if (message.type === "collectSidebarChats") {
-      collectSidebarChatLinks()
-        .then(chatUrls => sendResponse({ chatUrls, count: chatUrls.length, pageUrl: location.href }))
-        .catch(error => sendResponse({ chatUrls: [], error: error?.message || String(error) }));
-      return true;
-    }
-
-    if (message.type === "inspectBatchChat") {
-      inspectBatchChat()
-        .then(sendResponse)
-        .catch(error => sendResponse({ found: false, error: error?.message || String(error) }));
-      return true;
-    }
-  });
-
-  const observer = new MutationObserver(queueScan);
-  if (document.documentElement) {
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ["disabled", "aria-disabled", "class", "style", "aria-label"]
+    // No sidebar element found: fall back to every link, except ones clearly in the main area.
+    const everywhere = [...document.querySelectorAll("a[href]")].filter(anchor => {
+      const rect = anchor.getBoundingClientRect();
+      return !(rect.width && rect.height && rect.left > Math.max(520, window.innerWidth * 0.55));
     });
+    return chatUrlsFrom(everywhere);
   }
 
-  globalThis[INSTANCE_KEY] = { scan: scanPage };
-  queueScan();
-  window.setInterval(() => { void scanPage(); }, 10000);
+  // Claude may hide older chats behind a "View all" control.
+  function expandSidebar() {
+    const viewAll = [...document.querySelectorAll("button, a, [role='button']")]
+      .find(element => isVisible(element) && normalize(element.innerText || element.textContent) === "view all");
+    if (!viewAll) return false;
+    viewAll.click();
+    return true;
+  }
+
+  // Scrolls every scrollable sidebar container down by one page. Returns whether anything moved
+  // and whether all of them are now at the bottom.
+  function scrollSidebar() {
+    const roots = sidebarRoots();
+    const scope = roots.length ? roots : [document.body];
+    const seen = new Set();
+    let moved = false;
+    let atBottom = true;
+    for (const root of scope) {
+      for (const element of [root, ...root.querySelectorAll("*")]) {
+        if (seen.has(element)) continue;
+        seen.add(element);
+        const style = getComputedStyle(element);
+        const canScroll = element.scrollHeight > element.clientHeight + 40 &&
+          /(auto|scroll)/.test(`${style.overflowY} ${style.overflow}`);
+        if (!canScroll) continue;
+        const before = element.scrollTop;
+        element.scrollTop = Math.min(element.scrollHeight, before + Math.max(180, element.clientHeight * 0.8));
+        if (element.scrollTop !== before) moved = true;
+        if (element.scrollTop + element.clientHeight < element.scrollHeight - 2) atBottom = false;
+      }
+    }
+    return { moved, atBottom };
+  }
+
+  // ---- one chat ----
+
+  // What the page looks like right now. background.js polls this until the chat has loaded
+  // and stopped changing.
+  function snapshot() {
+    const action = findUsageLimitAction();
+    const text = visibleText(document.body);
+    return {
+      url: location.href,
+      readyState: document.readyState,
+      visibility: document.visibilityState,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      textLength: text.length,
+      limitNotice: containsLimitNotice(text),
+      action: action ? { name: action.buttonName } : null
+    };
+  }
+
+  // Looks the button up again (the page may have changed since snapshot()) and clicks it once.
+  function clickAction(expectedName) {
+    const hit = findUsageLimitAction();
+    if (!hit) return { clicked: false, reason: "the button was gone" };
+    if (expectedName && hit.buttonName !== expectedName) {
+      return { clicked: false, reason: `the button changed to "${hit.buttonName}"` };
+    }
+    hit.button.click();
+    return { clicked: true, name: hit.buttonName };
+  }
+
+  globalThis.__cbc = { version: VERSION, snapshot, clickAction, collectLinks, expandSidebar, scrollSidebar };
 })();

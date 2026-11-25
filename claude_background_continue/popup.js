@@ -20,10 +20,10 @@ function renderBatch(batch) {
   batchButton.disabled = running;
   stopButton.disabled = !running;
   if (!running) {
-    statusElement.textContent = "Automatic scanning is enabled for Claude tabs. Start an all-chat scan from the button above.";
+    statusElement.textContent = "Starts by itself when a Claude tab opens. You can also start it from the button above.";
     return;
   }
-  if (batch.phase === "collect" || batch.phase === "collecting") {
+  if (batch.phase === "collect") {
     statusElement.textContent = "Collecting chat links from the Claude sidebar…";
   } else {
     const total = batch.queue?.length || 0;
@@ -73,24 +73,6 @@ stopButton.addEventListener("click", async () => {
     statusElement.textContent = `Could not stop scan: ${error.message}`;
   }
   refresh();
-});
-
-document.getElementById("scan").addEventListener("click", async () => {
-  statusElement.textContent = "Connecting to Claude tab…";
-  try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tab = tabs && tabs[0];
-    if (!tab?.id || !tab.url?.startsWith("https://claude.ai/")) {
-      statusElement.textContent = "Open a claude.ai tab, then use Rescan this chat.";
-      return;
-    }
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-    statusElement.textContent = "Manual rescan requested. Automatic scanning remains enabled.";
-    window.setTimeout(refresh, 500);
-  } catch (error) {
-    statusElement.textContent = `Could not connect: ${error?.message || String(error)}`;
-    refresh();
-  }
 });
 
 document.getElementById("clear").addEventListener("click", () => {
