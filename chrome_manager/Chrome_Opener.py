@@ -6,6 +6,7 @@ import re
 import subprocess
 import time
 import traceback
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -26,7 +27,7 @@ except ImportError:
     raise SystemExit(1)
 
 # Tool version (see CHANGELOG.md). Bump this with every change that is merged.
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 MAX_PROFILES = 35
 MAX_CONCURRENT_PROFILES = 35   # never more than this many open at the same time
@@ -111,10 +112,19 @@ SWP_NOACTIVATE = 0x0010
 HIDE_UNTIL_LOADED = True  # set False for the old behaviour (shown again right after launch)
 HIDE_MAX_SECONDS = 20.0   # never keep a window invisible longer than this
 
-# Smart launch protection: defer new launches when the PC is under load.
-SAFE_CPU_PERCENT = 80.0
-SAFE_RAM_PERCENT = 90.0
-RESOURCE_SAMPLE_SECONDS = 0.25
+# Resource limits, so the PC does not hang with many windows open. A new window is opened only while
+# the load is below these limits. Windows that are already open are NOT closed because of them.
+SAFE_CPU_PERCENT = 70.0       # no new window while the average CPU load is above this
+SAFE_RAM_PERCENT = 80.0       # ...or while more than this share of RAM is in use
+MIN_FREE_RAM_MB = 2048        # ...or while less than this much RAM is free (matters on PCs with little RAM)
+RESUME_MARGIN_CPU = 10.0      # once paused, launching resumes only when the load is this far BELOW the limit,
+RESUME_MARGIN_RAM = 5.0       # so it does not switch on and off all the time
+RESUME_MARGIN_FREE_MB = 512
+CPU_SAMPLES_KEPT = 6          # CPU load is averaged over the last few checks (one spike while a window opens is normal)
+RESOURCE_SAMPLE_SECONDS = 0.25  # only used when no CPU sample has been taken yet
+LAUNCH_SPACING_SECONDS = 3.0  # at least this long between the starts of two windows, so one finishes loading before the next
+LOWER_CHROME_PRIORITY = True  # run Chrome at "below normal" CPU priority: the PC stays responsive when it is busy
+PRIORITY_REFRESH_SECONDS = 20.0  # Chrome keeps starting new processes; re-apply the priority this often
 RESOURCE_LOG_INTERVAL_SECONDS = 30
 END_PASS_RETRY_DELAY_SECONDS = 5  # one final retry after the normal profile scan
 _resource_wait_active = False
@@ -247,28 +257,100 @@ def log(message):
     except Exception:
         pass  # logging must never crash the main script
 
-def resources_safe_for_launch():
-    """Sample system load once before a launch; never block the monitoring loop.
+_cpu_samples = deque(maxlen=CPU_SAMPLES_KEPT)
 
-    If CPU/RAM is high, the caller skips new launches for this cycle while the
-    main loop continues watching already-open profiles.
-    """
+def sample_cpu_load():
+    """Called once per main-loop cycle: remembers how busy the CPU was since the previous cycle.
+    Never blocks, so checking the load before a launch does not delay the watching."""
+    try:
+        _cpu_samples.append(psutil.cpu_percent(interval=None))
+    except Exception:
+        pass
+
+def average_cpu_load():
+    if _cpu_samples:
+        return sum(_cpu_samples) / len(_cpu_samples)
+    return psutil.cpu_percent(interval=RESOURCE_SAMPLE_SECONDS)
+
+def resources_safe_for_launch(open_count=None):
+    """True when a new window may be opened: CPU (averaged over the last few checks), RAM in use and
+    free RAM are all within the limits. Never blocks the monitoring loop.
+
+    If not, the caller skips new launches for this cycle while the main loop continues watching
+    already-open profiles. Once paused, launching resumes only when the load is clearly lower
+    (the RESUME_MARGIN_* values), so it does not flip on and off around the limit."""
     global _resource_wait_active, _last_resource_wait_log
-    cpu = psutil.cpu_percent(interval=RESOURCE_SAMPLE_SECONDS)
-    ram = psutil.virtual_memory().percent
+    cpu = average_cpu_load()
+    memory = psutil.virtual_memory()
+    ram = memory.percent
+    free_mb = memory.available / (1024 * 1024)
     now_ts = time.time()
-    safe = cpu <= SAFE_CPU_PERCENT and ram <= SAFE_RAM_PERCENT
-    if safe:
+    if _resource_wait_active:
+        cpu_limit = SAFE_CPU_PERCENT - RESUME_MARGIN_CPU
+        ram_limit = SAFE_RAM_PERCENT - RESUME_MARGIN_RAM
+        free_needed = MIN_FREE_RAM_MB + RESUME_MARGIN_FREE_MB
+    else:
+        cpu_limit, ram_limit, free_needed = SAFE_CPU_PERCENT, SAFE_RAM_PERCENT, MIN_FREE_RAM_MB
+    if cpu <= cpu_limit and ram <= ram_limit and free_mb >= free_needed:
         if _resource_wait_active:
-            log(f"System load is back within limits (CPU={cpu:.0f}%, RAM={ram:.0f}%); resuming profile launches.")
+            log(f"System load is back within limits (CPU={cpu:.0f}%, RAM={ram:.0f}%, free RAM={free_mb:.0f} MB); resuming profile launches.")
         _resource_wait_active = False
         return True
     if (not _resource_wait_active or
             now_ts - _last_resource_wait_log >= RESOURCE_LOG_INTERVAL_SECONDS):
-        log(f"Pausing new profile launches because system load is high (CPU={cpu:.0f}% / limit {SAFE_CPU_PERCENT:.0f}%, RAM={ram:.0f}% / limit {SAFE_RAM_PERCENT:.0f}%). Existing profiles will continue to be monitored.")
+        opened = f"{open_count} window(s) open, " if open_count is not None else ""
+        log(f"Pausing new profile launches because system load is high ({opened}CPU={cpu:.0f}% / limit {SAFE_CPU_PERCENT:.0f}%, "
+            f"RAM={ram:.0f}% / limit {SAFE_RAM_PERCENT:.0f}%, free RAM={free_mb:.0f} MB / minimum {MIN_FREE_RAM_MB} MB). "
+            f"Open profiles keep being watched; launching resumes by itself when the load drops.")
         _last_resource_wait_log = now_ts
     _resource_wait_active = True
     return False
+
+_last_launch_at = 0.0
+
+def launch_spacing_ok():
+    """True when LAUNCH_SPACING_SECONDS have passed since the previous window was started."""
+    return time.time() - _last_launch_at >= LAUNCH_SPACING_SECONDS
+
+def note_launch_started():
+    global _last_launch_at
+    _last_launch_at = time.time()
+
+_priority_announced = False
+_priority_denied_logged = False
+
+def lower_chrome_priority():
+    """Give every Chrome process of the target Chrome the "below normal" CPU priority, so that when the
+    PC is busy the user's own programs (and this tool) get the CPU first and the PC does not feel hung.
+    Chrome still uses all the CPU nobody else wants. Processes Chrome already runs at a lower priority
+    are left alone. Best effort, never raises. Returns how many processes were changed."""
+    global _priority_announced, _priority_denied_logged
+    changed = denied = 0
+    try:
+        for p in psutil.process_iter(["name"]):
+            try:
+                if (p.info.get("name") or "").lower() != "chrome.exe":
+                    continue
+                if not is_target_executable(p.exe()):
+                    continue
+                if p.nice() in (psutil.IDLE_PRIORITY_CLASS, psutil.BELOW_NORMAL_PRIORITY_CLASS):
+                    continue
+                p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+                changed += 1
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                pass
+            except (psutil.AccessDenied, OSError):
+                denied += 1
+    except Exception:
+        return changed
+    if changed and not _priority_announced:
+        _priority_announced = True
+        log("Chrome CPU priority lowered to 'below normal' so the PC stays responsive when it is busy "
+            f"({changed} process(es) now; new ones are handled every {PRIORITY_REFRESH_SECONDS:.0f} s).")
+    elif denied and not changed and not _priority_announced and not _priority_denied_logged:
+        _priority_denied_logged = True
+        log("Could not lower the CPU priority of the Chrome processes (Windows refused); continuing without it.")
+    return changed
 
 def record_launch_failure(profile, info, count=True):
     """Apply exponential backoff after a failed launch attempt. The one end-of-pass retry of the same cycle
@@ -1091,7 +1173,9 @@ log("=" * 64)
 log(f"SMART CHROME PROFILE OPENER + LIMIT WATCHER v{VERSION} -- session started")
 log(f"Detected profiles={len(plist)} max_concurrent={MAX_CONCURRENT_PROFILES} "
     f"check_interval={CHECK_INTERVAL_SECONDS}s safe_cpu<={SAFE_CPU_PERCENT:.0f}% "
-    f"safe_ram<={SAFE_RAM_PERCENT:.0f}% retries=one end-of-pass retry + exponential backoff "
+    f"safe_ram<={SAFE_RAM_PERCENT:.0f}% min_free_ram={MIN_FREE_RAM_MB}MB launch_spacing={LAUNCH_SPACING_SECONDS:.0f}s "
+    f"low_chrome_priority={'on' if LOWER_CHROME_PRIORITY else 'off'} "
+    f"retries=one end-of-pass retry + exponential backoff "
     f"restore_minimized_windows={'on' if KEEP_WINDOWS_RESTORED else 'off'}")
 
 _awake = awake_flags_status()
@@ -1113,6 +1197,8 @@ save_state(state)
 print("\nOpening profiles and watching continuously. Press Ctrl+C to stop.\n")
 
 cycle_count = 0
+_last_priority_pass = 0.0
+psutil.cpu_percent(interval=None)  # the first call only starts the measurement; later calls give real values
 
 try:
     consecutive_errors = 0
@@ -1125,6 +1211,10 @@ try:
                     save_state(state)
             failed_this_cycle = []
             launches_paused_this_cycle = False
+            sample_cpu_load()
+            if LOWER_CHROME_PRIORITY and time.time() - _last_priority_pass >= PRIORITY_REFRESH_SECONDS:
+                _last_priority_pass = time.time()
+                lower_chrome_priority()
             _scan_seconds = 0.0
             purge_hidden_windows()
             for idx, profile in enumerate(plist):
@@ -1195,7 +1285,10 @@ try:
 
                 if launches_paused_this_cycle:
                     continue  # still monitor existing profiles, but defer new launches until next cycle
-                if not resources_safe_for_launch():
+                if not launch_spacing_ok():
+                    launches_paused_this_cycle = True  # the next window starts a few seconds after the previous one
+                    continue
+                if not resources_safe_for_launch(open_count):
                     launches_paused_this_cycle = True
                     continue
 
@@ -1208,6 +1301,7 @@ try:
                 any_open = any(s["hwnd"] is not None for s in state.values())
                 keep_focus_on = user32.GetForegroundWindow() if any_open else None
                 new_hwnd, hit, readable = launch_profile(profile, idx, restore_focus_to=keep_focus_on)
+                note_launch_started()
                 if new_hwnd is None:
                     record_launch_failure(profile, info)
                     failed_this_cycle.append((profile, idx))
@@ -1232,14 +1326,17 @@ try:
                         continue
                     if retry_launches_paused:
                         continue
-                    if not resources_safe_for_launch():
+                    if not resources_safe_for_launch(open_count):
                         retry_launches_paused = True
                         log(f"[{profile}] end-of-pass retry deferred because system load is high; scheduled backoff remains active.")
                         continue
+                    if not launch_spacing_ok():
+                        time.sleep(max(0.0, LAUNCH_SPACING_SECONDS - (time.time() - _last_launch_at)))
                     log(f"[{profile}] end-of-pass retry...")
                     any_open = any(s["hwnd"] is not None for s in state.values())
                     keep_focus_on = user32.GetForegroundWindow() if any_open else None
                     retry_hwnd, retry_hit, retry_readable = launch_profile(profile, idx, restore_focus_to=keep_focus_on)
+                    note_launch_started()
                     if retry_hwnd is None:
                         record_launch_failure(profile, info, count=False)
                     else:
