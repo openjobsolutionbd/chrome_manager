@@ -13,3 +13,11 @@ at the reset time. It does NOT press "Continue" -- for that use the Chrome exten
 Windows that are behind other windows, or minimized, keep working at full speed: Chrome is started with switches that stop it slowing down pages that are not in front, and a minimized window is brought back to its normal size at once (without taking the focus, behind the other windows), because Chrome treats a minimized window as hidden. Set `KEEP_WINDOWS_RESTORED = False` in `Chrome_Opener.py` if you want minimized windows to stay minimized.
 
 Version: `VERSION` in `Chrome_Opener.py`, history in `CHANGELOG.md`. Personal runtime files (`activity_log.txt`, `profile_state.json`) stay on your computer.
+
+## Known limits (found in a code review, not fixed)
+
+- A Chrome window you open yourself at the very moment a profile is being launched can be mistaken for that profile's window (the first new window is taken), and later be closed with it.
+- A window opened by hand is matched to a profile by looking for the profile's display name anywhere in the window's text, page text included. A short name can match by accident.
+- The reset time is read only from wording like "resets at / returns at / until H:MM AM/PM". Other wording (for example a weekly reset) falls back to the default wait.
+- `Chrome_Opener_Shut_Down.py` shuts the PC down at once (`SHUTDOWN_DELAY_SECONDS = 0`) and only checks that no other Chrome is running, not other programs.
+- The switches that keep covered windows awake (`KEEP_COVERED_WINDOWS_AWAKE`) work only when Chrome is started by this tool, so Chrome must not be open before.
