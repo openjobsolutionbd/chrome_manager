@@ -26,7 +26,7 @@ except ImportError:
     raise SystemExit(1)
 
 # Tool version (see CHANGELOG.md). Bump this with every change that is merged.
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 
 MAX_PROFILES = 35
 MAX_CONCURRENT_PROFILES = 35   # never more than this many open at the same time
@@ -77,15 +77,31 @@ RUNNING_PROFILES_TTL_SECONDS = 5.0  # the Chrome process list is only re-read th
 TARGET_PID_CACHE_SECONDS = 30.0   # remember "this process is the target Chrome" instead of asking Windows every time
 
 # Covered windows: Chrome normally freezes the page of a window that is completely hidden
-# behind other windows, and a frozen page cannot be read (log: page_nodes=0). These two
-# Chrome switches tell it NOT to treat covered windows as hidden, so they stay readable
-# without bringing anything to the front or stealing focus. They only take effect when
-# Chrome STARTS, so Chrome must be launched by this tool (or closed once and relaunched).
+# behind other windows, and a frozen page cannot be read (log: page_nodes=0). These Chrome
+# switches tell it NOT to treat covered windows as hidden and NOT to slow down pages that are
+# not in front, so they stay readable and keep running at full speed without bringing anything
+# to the front or stealing focus. They only take effect when Chrome STARTS, so Chrome must be
+# launched by this tool (or closed once and relaunched).
+# Chrome reads only ONE --disable-features switch (a second one replaces the first), so all
+# feature names go into the same switch, separated by commas.
 KEEP_COVERED_WINDOWS_AWAKE = True  # set False to launch Chrome without these switches
 AWAKE_CHROME_FLAGS = [
-    "--disable-features=CalculateNativeWinOcclusion",
+    "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling",
     "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
 ]
+
+# Minimized windows: the switches above do NOT help for a MINIMIZED window. Chrome treats it as
+# hidden whatever the switches say: its page is not drawn, its timers slow down to one tick a
+# minute and it can not be read reliably (neither by this tool nor by the extension). So a
+# minimized window is brought back to its normal size at once, WITHOUT taking the focus, and put
+# behind all other windows. Nothing changes for windows that are not minimized.
+KEEP_WINDOWS_RESTORED = True       # set False to let Chrome windows stay minimized
+RESTORED_LOG_INTERVAL_SECONDS = 60 # log "restored a minimized window" at most this often per window
+SW_SHOWNOACTIVATE = 4              # show in normal size, do not activate
+SW_RESTORE = 9                     # restore (activates the window)
+SWP_NOACTIVATE = 0x0010
 
 # New-window flash: a freshly created Chrome window paints a blank white page for a moment
 # while it loads. With HIDE_UNTIL_LOADED the window is made fully transparent (not minimized,
@@ -157,6 +173,10 @@ user32.SetLayeredWindowAttributes.argtypes = [ctypes.c_void_p, ctypes.c_uint, ct
 user32.SetLayeredWindowAttributes.restype = ctypes.c_bool
 user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
 user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+user32.IsIconic.argtypes = [ctypes.c_void_p]
+user32.IsIconic.restype = ctypes.c_bool
+user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+user32.ShowWindow.restype = ctypes.c_bool
 
 PROFILE_TAG_PROP = "ClaudeAutomationProfileIndex"
 
@@ -442,6 +462,41 @@ def maybe_reveal_window(hwnd, readable):
         reveal_window(hwnd, "page loaded")
     elif time.time() - entry[0] >= HIDE_MAX_SECONDS:
         reveal_window(hwnd, f"page still unreadable after {HIDE_MAX_SECONDS:.0f}s")
+
+_restored_log_at = {}  # hwnd -> when "restored a minimized window" was last written to the log
+
+def keep_window_restored(hwnd, profile=None):
+    """If this Chrome window is minimized, bring it back to its normal size WITHOUT activating it and
+    put it behind all other windows. Returns True when it was minimized.
+
+    A minimized window is "hidden" for Chrome (see KEEP_WINDOWS_RESTORED), so its page can not be read
+    properly and the extension's timers slow down. A window that is merely behind other windows is not
+    hidden (AWAKE_CHROME_FLAGS), so this puts it exactly there. Never raises."""
+    if not KEEP_WINDOWS_RESTORED:
+        return False
+    try:
+        if not user32.IsIconic(hwnd):
+            return False
+        before = user32.GetForegroundWindow()
+        user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+        if user32.IsIconic(hwnd):
+            # Some Windows versions restore a minimized window only with SW_RESTORE, which also
+            # activates it. Then give the focus straight back to what the user was working in.
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            if before and before != hwnd and user32.IsWindow(before):
+                user32.SetForegroundWindow(before)
+        user32.SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        now_ts = time.time()
+        if now_ts - _restored_log_at.get(hwnd, 0.0) >= RESTORED_LOG_INTERVAL_SECONDS:
+            _restored_log_at[hwnd] = now_ts
+            if len(_restored_log_at) > 256:
+                _restored_log_at.clear()
+            still = " (it is STILL minimized -- Windows refused to restore it)" if user32.IsIconic(hwnd) else ""
+            log(f"[{profile or '?'}] window was minimized -> restored behind the other windows, without "
+                f"taking focus (a minimized window can not be read or scanned properly){still}.")
+        return True
+    except Exception:
+        return False
 
 def reveal_all_hidden():
     for hwnd in list(_hidden_windows):
@@ -1013,6 +1068,7 @@ def close_any_limited_now(state):
         if not user32.IsWindow(hwnd):
             info["hwnd"] = None
             continue
+        keep_window_restored(hwnd, profile)
         hit, _, _ = scan_window(hwnd)
         if hit:
             reset_at, reason = compute_reopen_time(hit)
@@ -1035,7 +1091,8 @@ log("=" * 64)
 log(f"SMART CHROME PROFILE OPENER + LIMIT WATCHER v{VERSION} -- session started")
 log(f"Detected profiles={len(plist)} max_concurrent={MAX_CONCURRENT_PROFILES} "
     f"check_interval={CHECK_INTERVAL_SECONDS}s safe_cpu<={SAFE_CPU_PERCENT:.0f}% "
-    f"safe_ram<={SAFE_RAM_PERCENT:.0f}% retries=one end-of-pass retry + exponential backoff")
+    f"safe_ram<={SAFE_RAM_PERCENT:.0f}% retries=one end-of-pass retry + exponential backoff "
+    f"restore_minimized_windows={'on' if KEEP_WINDOWS_RESTORED else 'off'}")
 
 _awake = awake_flags_status()
 if _awake == "active":
@@ -1079,6 +1136,7 @@ try:
                         info["hwnd"] = None  # closed by the user, or something else
                         info["unverified_since"] = None
                         continue
+                    keep_window_restored(hwnd, profile)  # a minimized window can not be read; restore it first
                     hit, _, readable = scan_window(hwnd)
                     if hit:
                         reset_at, reason = compute_reopen_time(hit)

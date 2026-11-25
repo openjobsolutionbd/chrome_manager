@@ -12,6 +12,12 @@ Changes that do not alter the tools' behaviour (documentation, the other project
 Known limit: the log keeps only 3 days. If one session runs longer than 3 days, its start line (and so its version)
 is cleaned out of the log. Only `Chrome_Opener.py` carries the version; the other scripts do not write to the log.
 
+## 1.4.0
+Windows that are not in front keep working at full speed, minimized ones included:
+- A minimized Chrome window is brought back to its normal size at once, without taking the focus, and put behind all other windows (`keep_window_restored`, switch `KEEP_WINDOWS_RESTORED`). Chrome treats a minimized window as hidden whatever its start switches say: the page is not drawn, timers slow down to one tick a minute, and the limit message (and the extension) can not be read reliably. Windows that are only covered by other windows were already handled in 1.1.0.
+- More Chrome start switches for windows that are not in front: `--disable-renderer-backgrounding`, `--disable-background-timer-throttling`, and `IntensiveWakeUpThrottling` added to the (single) `--disable-features` switch. Chrome reads only one `--disable-features` switch, so all names are in the same one. A Chrome that is already running was started without them: the log says so at the start (close it once with `Chrome_Opener_Close_All.bat`, then start again).
+- Not tried on real Windows. If a minimized window does not come back, the log says "STILL minimized"; `KEEP_WINDOWS_RESTORED = False` switches the feature off.
+
 ## 1.3.2
 - All profiles (up to 35) may be open at the same time (was 10), so profiles without a limit can not keep the others from opening. The CPU/RAM safety pause for new launches stays, now at CPU 80% / RAM 90% (was 65% / 80%).
 
