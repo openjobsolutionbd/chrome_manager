@@ -29,11 +29,11 @@ name from the address and talks to `http://127.0.0.1:8765` (/ping, /limit, /log)
 
 ## Install / run
 Load `extension/` in every profile (same folder for all; after replacing its files, the log line `walk started (extension vX)` shows which version really ran) (chrome://extensions -> Developer mode -> Load unpacked).
-Remove the old claude_background_continue extension (double clicks). Close Chrome, run `launcher.py`.
+Remove the old claude_background_continue extension (double clicks). Close Chrome, then double-click `launcher.bat` (it runs `py launcher.py` in its own folder and keeps the window open so errors stay visible; same `py` command the old .bat used).
 First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for review.
 
 ## Status / known risks
-- Not yet tested in real Chrome. Limit text is matched in English only.
+- `launcher.bat` was written from the old .bat's pattern and not run on Windows yet. Not yet tested in real Chrome. Limit text is matched in English only.
 - Covered windows (10 at once) may run slowly; check the log.
 
 ## Owner's rules (said in chat)
