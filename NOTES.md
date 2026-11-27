@@ -1,4 +1,4 @@
-# Claude Limit Closer - handoff notes (extension v1.3, launcher.py v1.2.1)
+# Claude Limit Closer - handoff notes (extension v1.4, launcher.py v1.2.1)
 
 **RULE: Every time you make a new version, or change `extension/`, `launcher.py` or a decision, update `README.md` and this file in the SAME commit. Also write here whatever the owner said in chat that another session would need (decisions, problems seen, test results). The owner does NOT rely on Claude's own memory: if a chat is deleted, this repo must still hold everything. Never leave these files out of date.**
 
@@ -46,12 +46,15 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
 - Owner wants simple things; propose extras first, do not build them before the owner agrees.
 
 ## Current problems (2026-11-27)
-- Seen by the owner: extra tabs next to the main Claude tab (only the OLD extension "Claude Background Continue" opens tabs; launcher.py v1.2.1 logs which profiles still have it);
-  a "Try again" button not clicked; with slow internet the walk left a chat before its Continue button appeared.
-- v1.3 fixes (tested only in a simulated page, jsdom, not in real Chrome): the walk waits for each chat and the chat list to load; Try again/Continue
-  also found when the button is not a plain `<button>` (old code did not click it in the test); hand-opened tabs also write to the log (profile name "manual").
+- Owner reports: the Continue / Try again click after the free limit "does not work at all" (also with extension 1.3 installed and enabled, screenshot of a paused chat).
+  Cause not found: in a simulated copy of that page v1.3 did click. So v1.4 changes two things, tested only in the simulated page (jsdom), not in real Chrome:
+  1. Button matching now uses the same rules as the old extension (name from text / aria-label / title, invisible characters ignored, limit text up to 12 levels above the button).
+  2. Clicking sends pointer + mouse events and then click (old code sent a bare click only).
+- v1.4 also writes `DIAG:` lines to `launcher.log` when the limit text is on the page but no Continue button is found (lists the real buttons it sees). If the click still fails, READ THESE LINES FIRST: they show what the real page contains.
+- Logs only reach `launcher.log` while `launcher.py` is running.
+- Slow internet (v1.3): the walk waits for every chat and the chat list to load (up to 90 s); load times are logged ("loaded after N s").
 - Open: a profile has a 15-minute cap in launcher.py (`PROFILE_MAX_SECONDS`); with very slow internet a profile may be closed before all chats are done. Owner has not asked to change it.
-- Next check: owner runs with `BATCH_SIZE = 2` and sends `launcher.log` (look at "loaded after N s" lines and "NOT loaded").
+- Next check: owner runs `launcher.bat` with `BATCH_SIZE = 2` and sends `launcher.log`.
 
 ## Working together (several sessions use this repo)
 So that one session's work never breaks another's:

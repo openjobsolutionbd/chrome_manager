@@ -58,16 +58,66 @@
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   }
-  function findContinue() {
-    const buttons = [...document.querySelectorAll("button,[role='button']")].filter(visible);
-    for (const b of buttons) {
-      if (!/^(continue|try again|retry)$/i.test(b.textContent.trim())) continue;
-      let p = b.parentElement;
-      for (let i = 0; i < 4 && p; i++, p = p.parentElement) {
-        if (/paused when your free usage ran out|usage ran out/i.test(p.innerText || "")) return b;
-      }
+  // same matching rules as the old extension (names read from text / aria-label / title, invisible characters ignored)
+  const norm = (v) => String(v || "").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const MARKERS = ["paused when your free usage ran out", "free usage ran out", "usage ran out", "stopped by a usage limit", "usage limit", "out of free", "free messages return"];
+  function shown(el) {
+    if (!el || !el.isConnected) return false;
+    const st = getComputedStyle(el);
+    if (st.display === "none" || st.visibility === "hidden" || Number(st.opacity) === 0) return false;
+    return el.getClientRects().length > 0;
+  }
+  function actionName(el) {
+    for (const raw of [el.innerText, el.getAttribute("aria-label"), el.getAttribute("title"), el.value, el.textContent]) {
+      const m = norm(raw).match(/^(continue|try again|retry)(?=$|[\s:·])/);
+      if (m) return m[1];
     }
-    return buttons.find((b) => /^(try again|retry)$/i.test(b.textContent.trim())) || null;
+    return null;
+  }
+  function limitContext(el) {
+    let p = el.parentElement;
+    for (let i = 1; i <= 12 && p && p !== document.body; i++, p = p.parentElement) {
+      if (!shown(p)) continue;
+      const t = norm(p.innerText || p.textContent);
+      if (MARKERS.some((m) => t.includes(m))) return t.length + i * 3;
+    }
+    return null;
+  }
+  function actionButtons() {
+    return [...document.querySelectorAll("button,[role='button'],a,input[type='button'],input[type='submit']")].filter(
+      (e) => shown(e) && !e.disabled && e.getAttribute("aria-disabled") !== "true"
+    );
+  }
+  function findContinue() {
+    const els = actionButtons();
+    let best = null, bestScore = Infinity;
+    for (const e of els) {
+      if (!actionName(e)) continue;
+      const score = limitContext(e);
+      if (score !== null && score < bestScore) { best = e; bestScore = score; }
+    }
+    return best || els.find((e) => /^(try again|retry)$/.test(actionName(e) || "")) || null;
+  }
+  // full press (pointer + mouse + click), in case the page ignores a bare click()
+  function press(el) {
+    try {
+      for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup"])
+        el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
+    } catch (e) {}
+    el.click();
+  }
+  // if the page shows a limit text but no button is found, write what the page really contains into the log
+  let diagCount = 0, diagLast = 0;
+  function diagnose() {
+    if (diagCount >= 5 || Date.now() - diagLast < 20000) return;
+    if (!/usage ran out|usage limit|try again/.test(norm(document.body ? document.body.innerText : ""))) return;
+    diagLast = Date.now();
+    diagCount++;
+    const items = [...document.querySelectorAll("button,[role='button'],a")]
+      .filter((e) => /continue|try again|retry/i.test(e.textContent || ""))
+      .slice(0, 6)
+      .map((e) => `${e.tagName.toLowerCase()} "${norm(e.textContent).slice(0, 40)}" shown=${shown(e)} disabled=${!!e.disabled || e.getAttribute("aria-disabled")}`);
+    log("DIAG: limit text on the page but no clickable Continue found. Candidates: " + (items.join(" | ") || "none"));
   }
 
   // ---------- always-on watcher (limit -> close; hand-opened chats -> Continue) ----------
@@ -88,9 +138,9 @@
         const b = findContinue();
         if (b) {
           lastContinueClick = Date.now();
-          b.click();
-          log(`clicked "${b.textContent.trim()}" (watcher)`);
-        }
+          press(b);
+          log(`clicked "${norm(b.textContent)}" (watcher)`);
+        } else diagnose();
       } catch (e) {}
     }
   })();
@@ -210,12 +260,12 @@
       await sleep(T.afterLoaded);
       const b = await waitFor(findContinue, T.findContinue);
       if (b) {
-        b.click();
+        press(b);
         lastContinueClick = Date.now();
         await sleep(last ? 3000 : T.afterContinue);
         const again = findContinue();
         if (again) {
-          again.click();
+          press(again);
           log(`${tag}: Continue clicked, was still there, clicked again`);
           await sleep(3000);
         } else {
