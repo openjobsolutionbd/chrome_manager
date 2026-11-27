@@ -41,6 +41,7 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
 - Limit message seen -> close that profile at once. No limit -> all clicks done, wait 10 s, close.
 - No extension popup / log UI. All logs in ONE file (`launcher.log`) that the owner can show to Claude.
 - Send only changed files, not the whole zip. Final package name: ClaudeLimitCloser-vX.Y.zip.
+- Extension is installed by hand, once per profile (owner decided 2026-11-27). Do NOT build auto-loading from one folder.
 - Owner wants simple things; propose extras first, do not build them before the owner agrees.
 
 ## Current problems (2026-11-27)
@@ -51,5 +52,16 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
   profiles still have the old extension or lack the new one, then waits 30 s. Written without a real Chrome to test on: check it works.
 - Extension left unchanged on purpose: changing it means reloading it in every profile. If Try again still fails with only the new
   extension on, read `launcher.log`; next idea: also accept `role=button` elements.
-- Idea not built (owner must agree first): start Chrome with the extension loaded from one folder (no manual install per profile);
-  newer Chrome may block this.
+
+## Working together (several sessions use this repo)
+So that one session's work never breaks another's:
+1. Start: `git pull` main and read this file first.
+2. Work on your own branch named `work/<topic>`, never directly on someone else's branch.
+3. Before merging into main: pull main again. If main changed meanwhile, merge main into your branch and KEEP both sides' changes. Never overwrite or delete another session's work.
+4. Touch only the files your task needs. If two tasks need the same file, the later one waits for the first to be merged.
+5. Update `README.md` and this file in the same merge. When something becomes old or wrong, delete it.
+6. Push to main only finished, working changes. Do not rewrite history (no force push).
+7. Put the task you are doing under "Active work" below when you start, and remove the line when you finish.
+
+## Active work
+- (none)
