@@ -1,4 +1,4 @@
-# launcher.py  -  opens Chrome profiles in batches of 10.
+# launcher.py (v1.2.1)  -  opens Chrome profiles in batches of 10.
 # The extension (claude_limit_closer) does the clicking and closes Chrome when
 # the limit message shows. This script opens profiles, keeps time, writes ONE
 # log file, and opens the next batch when the current batch is finished.
@@ -92,6 +92,65 @@ def find_profiles():
     return names
 
 
+OLD_EXT = "Claude Background Continue"  # old extension: opens extra tabs, must be removed
+NEW_EXT = "Claude Limit Closer"
+
+
+def chrome_data_dir():
+    return os.path.join(os.environ["LOCALAPPDATA"], "Google", "Chrome", "User Data")
+
+
+def profile_display_names():
+    try:
+        with open(os.path.join(chrome_data_dir(), "Local State"), encoding="utf-8") as f:
+            cache = json.load(f)["profile"]["info_cache"]
+        return {k: v.get("name", k) for k, v in cache.items()}
+    except Exception:
+        return {}
+
+
+def enabled_extension_names(profile):
+    """Names of the extensions switched on in this profile (None = could not read)."""
+    names, read_ok = set(), False
+    for fn in ("Secure Preferences", "Preferences"):
+        try:
+            with open(os.path.join(chrome_data_dir(), profile, fn), encoding="utf-8") as f:
+                data = json.load(f)
+            read_ok = True
+            for ext in (data.get("extensions", {}).get("settings", {}) or {}).values():
+                name = (ext.get("manifest") or {}).get("name")
+                if name and ext.get("state", 1) != 0 and not ext.get("disable_reasons"):
+                    names.add(name)
+        except Exception:
+            pass
+    return names if read_ok else None
+
+
+def check_extensions(profiles):
+    """Tell the owner which profiles still have the old extension, or miss the new one."""
+    display = profile_display_names()
+    old, missing, unknown = [], [], []
+    for p in profiles:
+        names = enabled_extension_names(p)
+        label = f"{p} ({display.get(p, p)})"
+        if names is None:
+            unknown.append(label)
+            continue
+        if OLD_EXT in names:
+            old.append(label)
+        if NEW_EXT not in names:
+            missing.append(label)
+    if old:
+        log("", f"PROBLEM: old extension '{OLD_EXT}' is still ON in: {', '.join(old)}  -> remove it (it opens extra tabs)")
+    if missing:
+        log("", f"PROBLEM: '{NEW_EXT}' is NOT installed in: {', '.join(missing)}  -> install it")
+    if unknown:
+        log("", f"could not check extensions in: {', '.join(unknown)}")
+    if not (old or missing):
+        log("", "extension check OK")
+    return bool(old or missing)
+
+
 def launch(chrome, p):
     subprocess.Popen([
         chrome,
@@ -112,6 +171,9 @@ def main():
     chrome = find_chrome()
     remaining = find_profiles()
     log("", f"===== START: {len(remaining)} profiles, batch size {BATCH_SIZE} =====")
+    if check_extensions(remaining):
+        log("", "starting in 30 seconds anyway; close this window now if you want to fix the profiles above first")
+        time.sleep(30)
     results = {}
     n = 0
     while remaining:

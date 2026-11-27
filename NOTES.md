@@ -1,4 +1,4 @@
-# Claude Limit Closer v1.2 - handoff notes
+# Claude Limit Closer v1.2.1 - handoff notes
 
 **RULE: Every time you make a new version, or change `extension/`, `launcher.py` or a decision, update `README.md` and this file in the SAME commit. Also write here whatever the owner said in chat that another session would need (decisions, problems seen, test results). The owner does NOT rely on Claude's own memory: if a chat is deleted, this repo must still hold everything. Never leave these files out of date.**
 
@@ -33,10 +33,8 @@ Remove the old claude_background_continue extension (double clicks). Close Chrom
 First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for review.
 
 ## Status / known risks
-- v1.2 was NOT yet tested in real Chrome. Limit text is matched in English only.
-- Covered windows (10 at once) may still run slowly; check the log.
-- Old files (Chrome_Opener.bat, Stop_All, Shut_Down, claude_background_continue) were
-  removed on purpose on 2026-11-27; they remain in git history. Other branches untouched.
+- Not yet tested in real Chrome. Limit text is matched in English only.
+- Covered windows (10 at once) may run slowly; check the log.
 
 ## Owner's rules (said in chat)
 - Profiles opened one at a time, maximized, in front. Batches of 10, no rounds.
@@ -45,9 +43,13 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
 - Send only changed files, not the whole zip. Final package name: ClaudeLimitCloser-vX.Y.zip.
 - Owner wants simple things; propose extras first, do not build them before the owner agrees.
 
-## Findings (2026-11-27)
-- Owner saw extra tabs opening next to the main Claude tab. v1.2 never opens tabs; the OLD extension
-  "Claude Background Continue" does (chrome.tabs.create). Probably still installed in that profile. Owner to remove it and re-test.
-- Owner also saw a chat with "Stopped by a usage limit. You can try again now." and a "Try again" button that was not clicked
-  (maybe the old extension). v1.2 only looks at `<button>` elements; if it still fails with v1.2 alone, check whether
-  the button is another kind of element (role=button) and read `launcher.log`. Not changed yet, to avoid updating 35 profiles for nothing.
+## Current problems (2026-11-27)
+- Owner saw extra tabs next to the main Claude tab, and a "Try again" button (text: "Stopped by a usage limit. You can try again now.") not clicked.
+- v1.2 never opens tabs and clicks any visible `Try again` button, so the cause is most likely the OLD extension
+  "Claude Background Continue" (opens tabs) still on in that profile. Not confirmed.
+- v1.2.1 (launcher.py only, extension unchanged): at start the launcher reads each profile's Chrome settings and logs which
+  profiles still have the old extension or lack the new one, then waits 30 s. Written without a real Chrome to test on: check it works.
+- Extension left unchanged on purpose: changing it means reloading it in every profile. If Try again still fails with only the new
+  extension on, read `launcher.log`; next idea: also accept `role=button` elements.
+- Idea not built (owner must agree first): start Chrome with the extension loaded from one folder (no manual install per profile);
+  newer Chrome may block this.
