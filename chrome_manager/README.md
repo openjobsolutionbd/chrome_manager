@@ -1,7 +1,7 @@
 # chrome_manager
 
 Chrome Manager (Windows). Opens many Chrome profiles on claude.ai/new, detects the free-limit message, closes the window and reopens it
-at the reset time. It does NOT press "Continue" -- for that use the Chrome extension in the folder `claude_background_continue`.
+at the reset time.
 
 | File | What it does |
 |---|---|
@@ -9,6 +9,8 @@ at the reset time. It does NOT press "Continue" -- for that use the Chrome exten
 | `Stop_All.bat` | Stops Chrome Manager and closes the Chrome windows. |
 | `Chrome_Opener_Close_All.bat` | Closes all Chrome windows of this Chrome. |
 | `Chrome_Opener_Shut_Down.py` (`Shout_Down.py` is an identical copy) | Stops Chrome Manager, closes Chrome, then shuts the PC down. |
+
+So the PC does not hang with many windows open: a new window is opened only while CPU is at most 70%, RAM in use at most 80% and at least 2 GB of RAM is free, with at least 3 seconds between two windows; Chrome runs at "below normal" CPU priority. Open windows are never closed because of these limits, and they can still grow (a very long chat uses more RAM), so if the PC still struggles lower `MAX_CONCURRENT_PROFILES`. The numbers are the constants at the top of `Chrome_Opener.py` (`SAFE_CPU_PERCENT`, `SAFE_RAM_PERCENT`, `MIN_FREE_RAM_MB`, `LAUNCH_SPACING_SECONDS`, `LOWER_CHROME_PRIORITY`).
 
 Version: `VERSION` in `Chrome_Opener.py`, history in `CHANGELOG.md`. Personal runtime files (`activity_log.txt`, `profile_state.json`) stay on your computer.
 
