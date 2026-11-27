@@ -42,6 +42,7 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
 - No extension popup / log UI. All logs in ONE file (`launcher.log`) that the owner can show to Claude.
 - Send only changed files, not the whole zip. Final package name: ClaudeLimitCloser-vX.Y.zip.
 - Extension is installed by hand, once per profile (owner decided 2026-11-27). Do NOT build auto-loading from one folder.
+- How to talk to the owner: no lectures. Say only what blocks what the owner wants and what the OWNER must do to remove it (not how you fix it). Never give half information: on a subject give the full facts briefly so the owner can decide. Verify with evidence before advising. Nothing unverified or wrong goes into the repo.
 - Owner wants simple things; propose extras first, do not build them before the owner agrees.
 
 ## Current problems (2026-11-27)
