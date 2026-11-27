@@ -1,5 +1,7 @@
 # Claude Limit Closer v1.2 - handoff notes
 
+**RULE: Every time you change `extension/` or `launcher.py` (or a decision changes), update `README.md` and this file in the SAME commit. Never leave them out of date.**
+
 Owner is non-technical: explain simply, keep replies short, propose extras before building.
 
 ## What it does
