@@ -29,7 +29,7 @@
       chrome.runtime.sendMessage(m).catch(() => {});
     } catch (e) {}
   };
-  const log = (msg) => PROFILE && send({ type: "log", profile: PROFILE, msg });
+  const log = (msg) => send({ type: "log", profile: PROFILE || "manual", msg });
 
   let lastContinueClick = 0;
   let walkDone = false;
@@ -59,7 +59,7 @@
     return r.width > 0 && r.height > 0;
   }
   function findContinue() {
-    const buttons = [...document.querySelectorAll("button")].filter(visible);
+    const buttons = [...document.querySelectorAll("button,[role='button']")].filter(visible);
     for (const b of buttons) {
       if (!/^(continue|try again|retry)$/i.test(b.textContent.trim())) continue;
       let p = b.parentElement;
@@ -89,6 +89,7 @@
         if (b) {
           lastContinueClick = Date.now();
           b.click();
+          log(`clicked "${b.textContent.trim()}" (watcher)`);
         }
       } catch (e) {}
     }
@@ -124,13 +125,41 @@
   const chatLinks = () => [...document.querySelectorAll("a[href^='/chat/']")].filter(visible);
 
   async function openList() {
-    const v = await waitFor(viewAll, 15000);
+    const v = await waitFor(viewAll, 60000);
     if (!v) return false;
     v.click();
     return !!(await waitFor(
       () => location.pathname.startsWith("/recents") || location.pathname.startsWith("/chats"),
-      10000
+      60000
     ));
+  }
+
+  // slow internet: do not leave a chat / list before it has really loaded
+  async function waitChatLoaded(titleBefore) {
+    const t0 = Date.now();
+    let last = -1, same = 0, titleOk = false;
+    while (Date.now() - t0 < T.maxLoad) {
+      await sleep(1000);
+      if (limitShown()) return true;
+      if (!location.pathname.startsWith("/chat/")) continue;
+      if (document.title !== titleBefore) titleOk = true;
+      const len = document.body ? document.body.innerText.length : 0;
+      same = len === last ? same + 1 : 0;
+      last = len;
+      if (document.readyState === "complete" && same >= 3 && (titleOk || Date.now() - t0 > T.loadNoTitle)) return true;
+    }
+    return false;
+  }
+  async function waitListLoaded() {
+    const t0 = Date.now();
+    let last = -1, same = 0;
+    while (Date.now() - t0 < T.maxLoad) {
+      await sleep(1000);
+      const n = chatLinks().length;
+      same = n > 0 && n === last ? same + 1 : 0;
+      last = n;
+      if (same >= 2) return;
+    }
   }
 
   // timings copied from the user's video (milliseconds)
@@ -138,39 +167,47 @@
     beforeViewAll: 2700,  // /new page -> click "View all"
     firstList: 3250,      // first list page -> click first chat
     list: 2500,           // list page (later times) -> click next chat
-    beforeContinue: 3000, // chat opened -> click Continue
     findContinue: 12000,  // slow internet: keep looking this long for the button
     afterContinue: 6750,  // Continue clicked -> click "View all" again
+    maxLoad: 90000,       // slow internet: wait up to this long for a page to load
+    loadNoTitle: 20000,   // chat title never changed: accept the page as loaded after this long
+    afterLoaded: 1000,    // page loaded -> look for Continue
   };
 
   async function walk() {
     walking = true;
     send({ type: "maximize" });
-    log("walk started");
+    log(`walk started (extension v${chrome.runtime.getManifest().version})`);
     await waitFor(() => document.readyState === "complete" && viewAll(), 90000);
     if (!viewAll()) return log("STOP: 'View all' not found (not loaded, or not logged in)");
     await sleep(T.beforeViewAll);
     if (limitShown()) return;
     if (!(await openList())) return log("STOP: could not open the chat list");
     await sleep(T.firstList);
+    await waitListLoaded();
     const hrefs = [...new Set(chatLinks().map((a) => a.getAttribute("href")))].slice(0, 20);
     log(`found ${hrefs.length} chats`);
     for (let i = 0; i < hrefs.length; i++) {
       if (limitShown()) return;
       const last = i === hrefs.length - 1;
       const tag = `chat ${i + 1}/${hrefs.length}`;
-      let a = chatLinks().find((x) => x.getAttribute("href") === hrefs[i]);
+      const findLink = () => chatLinks().find((x) => x.getAttribute("href") === hrefs[i]);
+      let a = await waitFor(findLink, 60000);
       if (!a) {
         if (!(await openList())) return log("STOP: could not open the chat list");
         await sleep(T.list);
-        a = chatLinks().find((x) => x.getAttribute("href") === hrefs[i]);
+        a = await waitFor(findLink, 60000);
       }
       if (!a) {
         log(`${tag}: link not found, skipped`);
         continue;
       }
+      const titleBefore = document.title;
+      const tLoad = Date.now();
       a.click();
-      await sleep(T.beforeContinue);
+      const loaded = await waitChatLoaded(titleBefore);
+      log(`${tag}: ${loaded ? "loaded" : "NOT loaded"} after ${Math.round((Date.now() - tLoad) / 1000)} s`);
+      await sleep(T.afterLoaded);
       const b = await waitFor(findContinue, T.findContinue);
       if (b) {
         b.click();

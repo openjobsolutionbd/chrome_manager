@@ -1,4 +1,4 @@
-# Claude Limit Closer v1.2.1 - handoff notes
+# Claude Limit Closer - handoff notes (extension v1.3, launcher.py v1.2.1)
 
 **RULE: Every time you make a new version, or change `extension/`, `launcher.py` or a decision, update `README.md` and this file in the SAME commit. Also write here whatever the owner said in chat that another session would need (decisions, problems seen, test results). The owner does NOT rely on Claude's own memory: if a chat is deleted, this repo must still hold everything. Never leave these files out of date.**
 
@@ -17,7 +17,7 @@ continues paused chats, and closes each profile when the free limit is hit.
 ## Extension flow (timings measured from the owner's video)
 1. Page fully loaded -> wait 2.7 s -> click "View all".
 2. Chat list: wait 3.25 s (first) / 2.5 s (later) -> click a chat (max 20 chats, in order).
-3. Chat opened -> wait 3 s -> click "Continue" (up to 12 s search for slow internet).
+3. Chat opened -> stay until it has loaded (title changed + page text unchanged for 3 s; up to 90 s; slow internet) -> wait 1 s -> click "Continue" (up to 12 s search). Load time of every chat is written to the log.
 4. After Continue -> wait 6.75 s -> click "View all" again -> next chat.
 5. Last chat done -> launcher waits 10 s -> tells extension to close Chrome.
 Limit message seen at any time -> close the profile's windows immediately.
@@ -28,7 +28,7 @@ Launcher opens `https://claude.ai/new#cm=<profile>`; the extension reads the pro
 name from the address and talks to `http://127.0.0.1:8765` (/ping, /limit, /log).
 
 ## Install / run
-Load `extension/` in every profile (chrome://extensions -> Developer mode -> Load unpacked).
+Load `extension/` in every profile (same folder for all; after replacing its files, the log line `walk started (extension vX)` shows which version really ran) (chrome://extensions -> Developer mode -> Load unpacked).
 Remove the old claude_background_continue extension (double clicks). Close Chrome, run `launcher.py`.
 First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for review.
 
@@ -46,13 +46,12 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
 - Owner wants simple things; propose extras first, do not build them before the owner agrees.
 
 ## Current problems (2026-11-27)
-- Owner saw extra tabs next to the main Claude tab, and a "Try again" button (text: "Stopped by a usage limit. You can try again now.") not clicked.
-- v1.2 never opens tabs and clicks any visible `Try again` button, so the cause is most likely the OLD extension
-  "Claude Background Continue" (opens tabs) still on in that profile. Not confirmed.
-- v1.2.1 (launcher.py only, extension unchanged): at start the launcher reads each profile's Chrome settings and logs which
-  profiles still have the old extension or lack the new one, then waits 30 s. Written without a real Chrome to test on: check it works.
-- Extension left unchanged on purpose: changing it means reloading it in every profile. If Try again still fails with only the new
-  extension on, read `launcher.log`; next idea: also accept `role=button` elements.
+- Seen by the owner: extra tabs next to the main Claude tab (only the OLD extension "Claude Background Continue" opens tabs; launcher.py v1.2.1 logs which profiles still have it);
+  a "Try again" button not clicked; with slow internet the walk left a chat before its Continue button appeared.
+- v1.3 fixes (tested only in a simulated page, jsdom, not in real Chrome): the walk waits for each chat and the chat list to load; Try again/Continue
+  also found when the button is not a plain `<button>` (old code did not click it in the test); hand-opened tabs also write to the log (profile name "manual").
+- Open: a profile has a 15-minute cap in launcher.py (`PROFILE_MAX_SECONDS`); with very slow internet a profile may be closed before all chats are done. Owner has not asked to change it.
+- Next check: owner runs with `BATCH_SIZE = 2` and sends `launcher.log` (look at "loaded after N s" lines and "NOT loaded").
 
 ## Working together (several sessions use this repo)
 So that one session's work never breaks another's:
