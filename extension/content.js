@@ -39,17 +39,12 @@
   // ---------- limit message (reset time) ----------
   function limitLine() {
     if (!document.body) return null;
-    const lines = (document.body.innerText || "").split("\n");
-    for (let l of lines) {
-      l = l.trim();
-      if (l.length < 3 || l.length > 150) continue;
-      if (
-        (/out of (free )?messages/i.test(l) && /(until|resets?)\s*(at|in)?\s*\d/i.test(l)) ||
-        /(usage )?limit (reached|resets?)\s*(at|in)\s*\d/i.test(l)
-      )
-        return l;
-    }
-    return null;
+    const text = (document.body.innerText || "").replace(/[\u200b-\u200d\u2060\u00ad\ufeff]/g, "").replace(/\s+/g, " ");
+    // real page text: "You are out of free messages until tomorrow at 12:50 AM"
+    const m =
+      text.match(/out of (free )?messages.{0,60}?(until|resets?).{0,40}?\d/i) ||
+      text.match(/(usage )?limit (reached|resets?)\s*(at|in)\s*\d/i);
+    return m ? m[0].slice(0, 150) : null;
   }
   const limitShown = () => !!limitLine();
 

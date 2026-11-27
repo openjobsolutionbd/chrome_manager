@@ -1,4 +1,4 @@
-# Claude Limit Closer (এক্সটেনশন v1.4, launcher.py v1.2.1)
+# Claude Limit Closer (এক্সটেনশন v1.5, launcher.py v1.2.1)
 
 > এই ফাইলটি প্রতিটি পরিবর্তনের সাথে সাথে আপডেট করতে হয় (নিয়ম: `NOTES.md`-এর একদম উপরে)।
 
@@ -20,7 +20,7 @@ Chrome-এর অনেকগুলো প্রোফাইলে claude.ai ল
 4. `launcher.bat`-এ ডাবল ক্লিক করুন।
 
 ## এক্সটেনশন আপডেট করলে
-`extension` ফোল্ডারের ফাইল বদলান (সব প্রোফাইল একই ফোল্ডার থেকে লোড করা থাকলে একবারই)। `launcher.log`-এ `walk started (extension v1.4)` লেখা দেখলে বুঝবেন নতুনটাই চলেছে।
+`extension` ফোল্ডারের ফাইল বদলান (সব প্রোফাইল একই ফোল্ডার থেকে লোড করা থাকলে একবারই)। `launcher.log`-এ `walk started (extension v1.5)` লেখা দেখলে বুঝবেন নতুনটাই চলেছে।
 
 ## প্রথমবার টেস্ট
 `launcher.py`-তে `BATCH_SIZE = 10` এর জায়গায় `BATCH_SIZE = 2` লিখে চালান। শেষে `launcher.log` ফাইলটা Claude-কে দেখান।

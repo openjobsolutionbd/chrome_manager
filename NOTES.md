@@ -1,4 +1,4 @@
-# Claude Limit Closer - handoff notes (extension v1.4, launcher.py v1.2.1)
+# Claude Limit Closer - handoff notes (extension v1.5, launcher.py v1.2.1)
 
 **RULE: Every time you make a new version, or change `extension/`, `launcher.py` or a decision, update `README.md` and this file in the SAME commit. Also write here whatever the owner said in chat that another session would need (decisions, problems seen, test results). The owner does NOT rely on Claude's own memory: if a chat is deleted, this repo must still hold everything. Never leave these files out of date.**
 
@@ -50,6 +50,10 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
   Cause not found: in a simulated copy of that page v1.3 did click. So v1.4 changes two things, tested only in the simulated page (jsdom), not in real Chrome:
   1. Button matching now uses the same rules as the old extension (name from text / aria-label / title, invisible characters ignored, limit text up to 12 levels above the button).
   2. Clicking sends pointer + mouse events and then click (old code sent a bare click only).
+- Owner screenshot: "You are out of free messages until tomorrow at 12:50 AM" was not detected (the profile's windows did not close; the extension closes them itself, launcher not needed).
+  v1.5: limit-text matching now ignores invisible characters (a simulated page with such characters was NOT detected before the fix, detected after). Not confirmed as the real cause.
+  Not testable in the simulation: the text split over separate blocks (jsdom has no real innerText).
+- Owner's sample video (claude_chat_continue_click_1.mp4) shows the wanted flow: /new -> "View all" -> open a chat -> "Continue" in the "Paused when your free usage ran out" bar -> chat runs -> "View all" -> next chat. It matches the walk below.
 - v1.4 also writes `DIAG:` lines to `launcher.log` when the limit text is on the page but no Continue button is found (lists the real buttons it sees). If the click still fails, READ THESE LINES FIRST: they show what the real page contains.
 - Logs only reach `launcher.log` while `launcher.py` is running.
 - Slow internet (v1.3): the walk waits for every chat and the chat list to load (up to 90 s); load times are logged ("loaded after N s").
