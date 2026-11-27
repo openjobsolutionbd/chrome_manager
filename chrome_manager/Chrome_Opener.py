@@ -27,12 +27,12 @@ except ImportError:
     raise SystemExit(1)
 
 # Tool version (see CHANGELOG.md). Bump this with every change that is merged.
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 MAX_PROFILES = 35
-MAX_CONCURRENT_PROFILES = 35   # never more than this many open at the same time
+MAX_CONCURRENT_PROFILES = 10   # never more than this many open at the same time
 MAX_WAIT_FOR_WINDOW = 20  # only wait for the OS window; page verification runs in the watcher
-CHECK_INTERVAL_SECONDS = 0.5
+CHECK_INTERVAL_SECONDS = 0.25
 TARGET_URL = "https://claude.ai/new"
 # "out of free" catches "You are out of free messages until <time>" too, and
 # "free messages return" catches "Your free messages return at <time>" --
@@ -71,8 +71,8 @@ IDENTIFY_MANUAL_EVERY_N_CYCLES = 20  # how often to look for manually-opened win
 # Low-overhead scanning (see "fast page reading" below).
 USE_FAST_SCAN = True              # read each page with ONE cached UI Automation query; falls back to the slow walk on any failure
 FAST_SCAN_MAX_FAILURES = 5        # this many consecutive fast-scan errors -> use the slow walk for the rest of the session
-FULL_READ_EVERY_SECONDS = 10.0   # a page already confirmed readable gets a cheap phrase probe; its full text is re-read this often
-MAX_SCAN_DUTY_CYCLE = 0.25        # scanning may use at most about this share of wall time; the loop sleeps longer if scans get slow
+FULL_READ_EVERY_SECONDS = 5.0   # a page already confirmed readable gets a cheap phrase probe; its full text is re-read this often
+MAX_SCAN_DUTY_CYCLE = 0.5         # scanning may use at most about this share of wall time; the loop sleeps longer if scans get slow
 MAX_ADAPTIVE_SLEEP_SECONDS = 2.0  # ...but it never sleeps longer than this between checks
 RUNNING_PROFILES_TTL_SECONDS = 5.0  # the Chrome process list is only re-read this often (and always right before a launch)
 TARGET_PID_CACHE_SECONDS = 30.0   # remember "this process is the target Chrome" instead of asking Windows every time
@@ -95,7 +95,7 @@ AWAKE_CHROME_FLAGS = [
 
 # Minimized windows: the switches above do NOT help for a MINIMIZED window. Chrome treats it as
 # hidden whatever the switches say: its page is not drawn, its timers slow down to one tick a
-# minute and it can not be read reliably (neither by this tool nor by the extension). So a
+# minute and it can not be read reliably (not reliably by this tool). So a
 # minimized window is brought back to its normal size at once, WITHOUT taking the focus, and put
 # behind all other windows. Nothing changes for windows that are not minimized.
 KEEP_WINDOWS_RESTORED = True       # set False to let Chrome windows stay minimized
@@ -552,7 +552,7 @@ def keep_window_restored(hwnd, profile=None):
     put it behind all other windows. Returns True when it was minimized.
 
     A minimized window is "hidden" for Chrome (see KEEP_WINDOWS_RESTORED), so its page can not be read
-    properly and the extension's timers slow down. A window that is merely behind other windows is not
+    properly and its timers slow down. A window that is merely behind other windows is not
     hidden (AWAKE_CHROME_FLAGS), so this puts it exactly there. Never raises."""
     if not KEEP_WINDOWS_RESTORED:
         return False

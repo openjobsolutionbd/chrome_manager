@@ -14,8 +14,8 @@ except ImportError:
     input("\nPress Enter to exit...")
     raise SystemExit(1)
 
-SCRIPT_NAMES = {"chrome_opener.py", "claude_auto_continue.py"}
-BAT_NAMES = {"chrome_opener.bat", "claude_auto_continue.bat"}
+SCRIPT_NAMES = {"chrome_opener.py"}
+BAT_NAMES = {"chrome_opener.bat"}
 CLOSE_SECONDS = 15
 
 def find_target_executable():

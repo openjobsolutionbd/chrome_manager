@@ -1,6 +1,6 @@
 # Chrome Manager - changelog
 
-This is the changelog of the project "Chrome Manager" (repository root). The "Continue" button presser is the Chrome extension in the separate folder `claude_background_continue`.
+This is the changelog of the project "Chrome Manager" (repository root).
 
 Version number is `VERSION` in `Chrome_Opener.py`. It is printed at the start of every session in `activity_log.txt`
 (`... LIMIT WATCHER vX.Y.Z -- session started`), so a log line can always be matched to a version.
@@ -11,6 +11,12 @@ Changes that do not alter the tools' behaviour (documentation, the other project
 
 Known limit: the log keeps only 3 days. If one session runs longer than 3 days, its start line (and so its version)
 is cleaned out of the log. Only `Chrome_Opener.py` carries the version; the other scripts do not write to the log.
+
+## 1.6.0
+Ten windows at a time, and the free limit is noticed faster:
+- `MAX_CONCURRENT_PROFILES` is 10 again (was 35), so the PC has room to breathe.
+- Faster limit detection: the check cycle is 0.25 s (was 0.5 s), scanning may use up to half of the time (was a quarter) so the cycle stays short even when pages are slow to read, and a page is fully re-read every 5 s (was 10 s). The Opener scans a little more, and still keeps normal priority so it is not slowed down by Chrome.
+- The Chrome extension "Claude Background Continue" is removed from the repository (no longer needed).
 
 ## 1.5.0
 Resource limits, so the PC does not hang with many windows open:
