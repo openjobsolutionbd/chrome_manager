@@ -1,14 +1,16 @@
 # chrome_manager - handoff notes (section 1 Claude Limit Closer: extension v1.5, launcher.py v1.2.1; section 2 Chrome Opener v2.1.0)
 
-**RULE: Every time you make a new version, or change `claude-limit-closer/`, `chrome-opener/` or a decision, update the root `README.md`, the changed section's own `README.md` and this file in the SAME commit. Also write here whatever the owner said in chat that another session would need (decisions, problems seen, test results). The owner does NOT rely on Claude's own memory: if a chat is deleted, this repo must still hold everything. Never leave these files out of date.**
+**RULE: Every time you make a new version, or change `1-claude-limit-closer/`, `2-chrome-opener/` or a decision, update the root `README.md` (version table), the changed section's own `README.md` and `CHANGELOG.md`, and this file in the SAME commit. Also write here whatever the owner said in chat that another session would need (decisions, problems seen, test results). The owner does NOT rely on Claude's own memory: if a chat is deleted, this repo must still hold everything. Never leave these files out of date.**
 
 Owner is non-technical: explain simply, keep replies short, propose extras before building.
 
 ## Repo layout: two independent sections (owner's decision 2026-11-28)
-- `claude-limit-closer/` - section 1: Chrome extension + `launcher.py` + `launcher.bat` (+ its own `README.md`).
-- `chrome-opener/` - section 2: `Chrome_Opener.py` (Python/UI Automation tool) + `Chrome_Opener_Shut_Down.py` (+ its own `README.md`).
-The two do not depend on each other; never mix their files. This file (`NOTES.md`) and the root `README.md` are shared.
-Everything from "What it does" down to "Current problems" below is about section 1; file paths there are relative to `claude-limit-closer/`. Section 2 notes are in their own part further down.
+- `1-claude-limit-closer/` - section 1: Chrome extension + `launcher.py` + `launcher.bat` (+ its own `README.md`).
+- `2-chrome-opener/` - section 2: `Chrome_Opener.py` (Python/UI Automation tool) + `Chrome_Opener_Shut_Down.py` (+ its own `README.md`).
+The two do not depend on each other; never mix their files. This file (`NOTES.md`), the root `README.md` and `.gitignore` are shared.
+- Folder names start with the section number (1-, 2-). The version of each section is written in 3 places that must always agree: the title of the section's `README.md`, the top entry of its `CHANGELOG.md`, and the version table in the root `README.md` (plus the version inside the code: `extension/manifest.json`, `launcher.py` header, `TOOLKIT_VERSION` in `Chrome_Opener.py`). Each released version also gets a git tag: `claude-limit-closer-vX.Y` / `chrome-opener-vX.Y.Z` (the old tag `v1.1.0` belongs to the project before the 2026-11-27 replacement).
+- `.gitignore` hides `__pycache__/` and the private runtime files (`activity_log.txt`, `profile_state.json`, `report.txt`, `launcher.log`). Never force-add them.
+Everything from "What it does" down to "Current problems" below is about section 1; file paths there are relative to `1-claude-limit-closer/`. Section 2 notes are in their own part further down.
 
 ## What it does
 ~35 Chrome profiles are logged in to claude.ai. The tool opens them in batches of 10,
@@ -66,7 +68,7 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
 - Open: a profile has a 15-minute cap in launcher.py (`PROFILE_MAX_SECONDS`); with very slow internet a profile may be closed before all chats are done. Owner has not asked to change it.
 - Next check: owner runs `launcher.bat` with `BATCH_SIZE = 2` and sends `launcher.log`.
 
-## Section 2: Chrome Opener (`chrome-opener/`, v2.1.0) - separate from section 1
+## Section 2: Chrome Opener (`2-chrome-opener/`, v2.1.0) - separate from section 1
 - What: Windows Python tool. Opens the owner's ~35 Chrome profiles one at a time, reads claude.ai with UI Automation (`py -m pip install psutil uiautomation`), goes to `claude.ai/chats` in the SAME tab (address bar; sidebar "View all" is the backup and is used to come back from a chat), opens each chat, clicks "Continue" / "Try again" on paused chats, closes the profile window when the free-usage limit message shows (reset time is saved in `profile_state.json`).
 - `Chrome_Opener_Shut_Down.py`: owner's separate helper (closes app windows normally, then shuts Windows down). Owner decided NOT to join it with the opener.
 - Runtime files next to the script: `activity_log.txt`, `profile_state.json`, `report.txt`. They are private: NEVER commit them and never paste them anywhere (the script copies text it reads from chats; a GitHub token once ended up in a log). Never write tokens or passwords into this repo or these notes.

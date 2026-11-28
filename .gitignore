@@ -1,0 +1,9 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Private files the tools create while running - never commit them
+activity_log.txt
+profile_state.json
+report.txt
+launcher.log
