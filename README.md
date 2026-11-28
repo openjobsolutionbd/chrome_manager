@@ -1,6 +1,6 @@
 # chrome_manager
 
-এখানে তিনটি আলাদা টুল আছে, তিনটি আলাদা ফোল্ডারে। একটা অন্যটার ওপর নির্ভর করে না।
+এখানে তিনটি আলাদা টুল আছে, তিনটি আলাদা ফোল্ডারে। একটা অন্যটার ওপর নির্ভর করে না: প্রতিটা সেকশন সম্পূর্ণ স্বাধীন, তাই দরকারি সব ফাইল নিজের ফোল্ডারেই থাকে (একই নামের ফাইল একাধিক সেকশনে থাকতে পারে, সেটা ইচ্ছাকৃত)।
 
 > নিয়ম: প্রতিটি পরিবর্তনের সাথে এই ফাইল, ওই ফোল্ডারের `README.md` আর `NOTES.md` আপডেট করতে হয় (নিয়ম `NOTES.md`-এর একদম উপরে)।
 
@@ -9,9 +9,9 @@
 |---|---|---|---|
 | ১ | `1-claude-limit-closer-with-extention/` | এক্সটেনশন 1.5 · launcher.py 1.2.1 | [`CHANGELOG.md`](1-claude-limit-closer-with-extention/CHANGELOG.md) |
 | ২ | `2-chrome-opener-with-py/` | Chrome Opener 2.1.0 | [`CHANGELOG.md`](2-chrome-opener-with-py/CHANGELOG.md) |
-| ৩ | `3-only-chrome-opener/` | Only Chrome Opener 1.0.0 | [`CHANGELOG.md`](3-only-chrome-opener/CHANGELOG.md) |
+| ৩ | `3-only-chrome-opener/` | Only Chrome Opener 1.0.1 | [`CHANGELOG.md`](3-only-chrome-opener/CHANGELOG.md) |
 
-প্রতিটি ভার্সনের জন্য GitHub-এ একটা ট্যাগ থাকে: `claude-limit-closer-v1.5`, `chrome-opener-v2.1.0`, `only-chrome-opener-v1.0.0`।
+প্রতিটি ভার্সনের জন্য GitHub-এ একটা ট্যাগ থাকে: `claude-limit-closer-v1.5`, `chrome-opener-v2.1.0`, `only-chrome-opener-v1.0.1`।
 
 ## ফোল্ডার সাজানো
 ```
@@ -39,7 +39,8 @@ chrome_manager/
     ├── Chrome_Opener.py
     ├── Chrome_Opener.bat
     ├── Chrome_Opener_Close_All.py
-    └── Chrome_Opener_Close_All.bat
+    ├── Chrome_Opener_Close_All.bat
+    └── Chrome_Opener_Shut_Down.py
 ```
 
 ## ১. Claude Limit Closer — ফোল্ডার `1-claude-limit-closer-with-extention/`
@@ -51,7 +52,7 @@ Python টুল (`Chrome_Opener.py`)। প্রোফাইল একটা �
 বিস্তারিত: [`2-chrome-opener-with-py/README.md`](2-chrome-opener-with-py/README.md)
 
 ## ৩. Only Chrome Opener — ফোল্ডার `3-only-chrome-opener/`
-Python টুল (`Chrome_Opener.py`)। **শুধু** প্রোফাইল খোলে আর লিমিট ধরে; চ্যাটে ঢুকে কিছু চাপে না। শুরুতে একসাথে ১০টা প্রোফাইল ব্যাচে খোলে, খোলা জানালাগুলো বারবার স্ক্যান করে, ফ্রি লিমিটের মেসেজ দেখলে ওই প্রোফাইল বন্ধ করে, আর রিসেটের সময় হলে নিজে আবার খোলে। সাথে `Chrome_Opener_Close_All` (সব Chrome জানালা বন্ধ)।
+Python টুল (`Chrome_Opener.py`)। **শুধু** প্রোফাইল খোলে আর লিমিট ধরে; চ্যাটে ঢুকে কিছু চাপে না। শুরুতে একসাথে ১০টা প্রোফাইল ব্যাচে খোলে, খোলা জানালাগুলো বারবার স্ক্যান করে, ফ্রি লিমিটের মেসেজ দেখলে ওই প্রোফাইল বন্ধ করে, আর রিসেটের সময় হলে নিজে আবার খোলে। সাথে `Chrome_Opener_Close_All` (সব Chrome জানালা বন্ধ) আর `Chrome_Opener_Shut_Down.py` (Chrome বন্ধ করে পিসি শাট ডাউন)।
 বিস্তারিত: [`3-only-chrome-opener/README.md`](3-only-chrome-opener/README.md)
 
 ## Claude-এর জন্য নোট

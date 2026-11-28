@@ -1,6 +1,6 @@
-# Section 3: Only Chrome Opener - notes (v1.0.0)
+# Section 3: Only Chrome Opener - notes (v1.0.1)
 
-Shared rules (how to work in this repo, how to talk to the owner): `../NOTES.md`. File paths below are relative to this folder. This section is independent of sections 1 and 2; never mix their files.
+Shared rules (how to work in this repo, how to talk to the owner): `../NOTES.md`. File paths below are relative to this folder. This section is TOTALLY independent of sections 1 and 2 (owner's rule, 2026-11-28): it holds its own copy of every file it needs, never imports or refers to another section's files, and never mix their files.
 
 ## What it does
 - Windows Python tool (`Chrome_Opener.py`, one file, ~950 lines). Needs `py -m pip install psutil uiautomation` (`Chrome_Opener.bat` installs them when missing).
@@ -14,12 +14,14 @@ Shared rules (how to work in this repo, how to talk to the owner): `../NOTES.md`
 
 ## Files
 - `Chrome_Opener.py` main tool; `Chrome_Opener.bat` launcher.
-- `Chrome_Opener_Close_All.py` / `.bat`: closes every window of that Chrome (posts WM_CLOSE, confirms the "Leave site?" dialog with Enter, up to 4 rounds). This section's own copy; there is no shut-down script here (the shut-down helper lives only in section 2, owner decided not to join it with an opener).
+- `Chrome_Opener_Close_All.py` / `.bat`: closes every window of that Chrome (posts WM_CLOSE, confirms the "Leave site?" dialog with Enter, up to 4 rounds). This section's own copy.
+- `Chrome_Opener_Shut_Down.py`: separate helper, not joined with the opener (owner's decision). Closes only the windows of this Chrome with WM_CLOSE, then shuts Windows down; it cancels the shut-down (nothing is lost) if those windows do not close in `CLOSE_TIMEOUT_SECONDS` (30) or if another Chrome channel is still running. This is the owner's own file for the opener (the owner also had an identical duplicate named `Shout_Down.py`, not added). Section 2 has a DIFFERENT shut-down script (it closes all app windows); the two are not kept in sync, each section's copy is changed only in its own section.
 - Private runtime files next to the script: `activity_log.txt` (entries older than `LOG_RETENTION_DAYS` = 3 are removed), `profile_state.json` (per profile: `reopen_at`, `backoff_until`, `fail_count`). NEVER commit them (`.gitignore` hides them) and never paste them anywhere. Never write tokens or passwords into this repo or these notes.
 
 ## Owner decisions
 - (2026-11-28) Open 10 profiles together as a batch at the start. No need to open one by one in the background (before: max 7 open, one launch per cycle, with a full scan of all open windows before every launch).
 - (2026-11-28) The limit-finished detection must work strongly in the background (several steps taken, see CHANGELOG 1.0.0).
+- (2026-11-28) The sections are totally independent: each section folder holds its own copy of every file it needs (so a helper such as the shut-down script is duplicated across sections on purpose). The owner said this twice; never move a file out to a shared place and never make a section depend on another one.
 - (2026-11-28) Added as section 3 under the folder name `3-only-chrome-opener` (owner wrote "3. only-chrome-opener"); the owner asked for documentation that lets any session understand it.
 - (2026-11-28) Refilling: when windows close because of limits, the free slots are filled with the next due profiles, again as one batch (no waiting for all 10 to be free). This is my reading of the owner's wish; the owner has not been asked about it.
 

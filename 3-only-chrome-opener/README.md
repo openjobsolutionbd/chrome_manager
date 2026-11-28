@@ -1,4 +1,4 @@
-# Only Chrome Opener (v1.0.0)
+# Only Chrome Opener (v1.0.1)
 
 > এই ফাইল প্রতিটি পরিবর্তনের সাথে আপডেট করতে হয় (নিয়ম: `../NOTES.md`-এর একদম উপরে)।
 
@@ -14,7 +14,10 @@ Chrome-এর অনেকগুলো প্রোফাইলে claude.ai ল
 ## ফাইল
 - `Chrome_Opener.py` — মূল টুল।
 - `Chrome_Opener.bat` — ডাবল ক্লিকে চালু করে (`psutil` আর `uiautomation` না থাকলে নিজে ইনস্টল করে)।
-- `Chrome_Opener_Close_All.py` / `Chrome_Opener_Close_All.bat` — সব Chrome জানালা স্বাভাবিকভাবে বন্ধ করে। এই সেকশনের নিজস্ব কপি।
+- `Chrome_Opener_Close_All.py` / `Chrome_Opener_Close_All.bat` — সব Chrome জানালা স্বাভাবিকভাবে বন্ধ করে।
+- `Chrome_Opener_Shut_Down.py` — আলাদা: Chrome জানালাগুলো স্বাভাবিকভাবে বন্ধ করে পিসি শাট ডাউন করে। মূল টুলের সাথে যুক্ত নয়। কোনো Chrome জানালা বন্ধ না হলে, বা অন্য Chrome চ্যানেল খোলা থাকলে শাট ডাউন বাতিল হয় (কাজ হারানো ঠেকাতে)।
+
+> এই সেকশনের সব ফাইল এই ফোল্ডারেই আছে। অন্য সেকশনের কোনো ফাইল লাগে না।
 - `NOTES.md` — Claude-এর জন্য বিস্তারিত নোট (ইংরেজিতে); সবার জন্য নিয়ম `../NOTES.md`-এ।
 - `CHANGELOG.md` — ভার্সনের ইতিহাস।
 
@@ -22,6 +25,7 @@ Chrome-এর অনেকগুলো প্রোফাইলে claude.ai ল
 1. প্রথমে `Chrome_Opener_Close_All.bat` চালান (সব Chrome বন্ধ হবে)। এটা জরুরি: টুল Chrome চালুর সময় কিছু সেটিং দেয়, যা Chrome আগে থেকে খোলা থাকলে কাজ করে না।
 2. `Chrome_Opener.bat` ডাবল ক্লিক করুন।
 3. চলার সময় Chrome জানালা নিজে বন্ধ করবেন না। থামাতে কালো জানালায় Ctrl+C।
+4. কাজ শেষে পিসি বন্ধ করতে চাইলে (Chrome_Opener থামিয়ে) `py Chrome_Opener_Shut_Down.py` চালান।
 
 ## যে ফাইলগুলো টুল নিজে বানায় (একই ফোল্ডারে)
 - `activity_log.txt` — কী হলো তার লগ। ৩ দিনের পুরনো লাইন নিজে মুছে যায়।

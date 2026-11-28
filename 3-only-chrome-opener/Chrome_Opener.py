@@ -23,7 +23,7 @@ except ImportError:
     input("\nPress Enter to exit...")
     raise SystemExit(1)
 
-TOOLKIT_VERSION = "1.0.0"      # keep equal to the version in README.md / CHANGELOG.md / root README table
+TOOLKIT_VERSION = "1.0.1"      # keep equal to the version in README.md / CHANGELOG.md / root README table
 MAX_PROFILES = 35
 MAX_CONCURRENT_PROFILES = 10   # never more than this many open at the same time
 BATCH_SIZE = 10                # open up to this many profiles together in one batch
