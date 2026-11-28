@@ -1,8 +1,14 @@
-# Claude Limit Closer - handoff notes (extension v1.5, launcher.py v1.2.1)
+# chrome_manager - handoff notes (section 1 Claude Limit Closer: extension v1.5, launcher.py v1.2.1; section 2 Chrome Opener v2.1.0)
 
-**RULE: Every time you make a new version, or change `extension/`, `launcher.py` or a decision, update `README.md` and this file in the SAME commit. Also write here whatever the owner said in chat that another session would need (decisions, problems seen, test results). The owner does NOT rely on Claude's own memory: if a chat is deleted, this repo must still hold everything. Never leave these files out of date.**
+**RULE: Every time you make a new version, or change `claude-limit-closer/`, `chrome-opener/` or a decision, update the root `README.md`, the changed section's own `README.md` and this file in the SAME commit. Also write here whatever the owner said in chat that another session would need (decisions, problems seen, test results). The owner does NOT rely on Claude's own memory: if a chat is deleted, this repo must still hold everything. Never leave these files out of date.**
 
 Owner is non-technical: explain simply, keep replies short, propose extras before building.
+
+## Repo layout: two independent sections (owner's decision 2026-11-28)
+- `claude-limit-closer/` - section 1: Chrome extension + `launcher.py` + `launcher.bat` (+ its own `README.md`).
+- `chrome-opener/` - section 2: `Chrome_Opener.py` (Python/UI Automation tool) + `Chrome_Opener_Shut_Down.py` (+ its own `README.md`).
+The two do not depend on each other; never mix their files. This file (`NOTES.md`) and the root `README.md` are shared.
+Everything from "What it does" down to "Current problems" below is about section 1; file paths there are relative to `claude-limit-closer/`. Section 2 notes are in their own part further down.
 
 ## What it does
 ~35 Chrome profiles are logged in to claude.ai. The tool opens them in batches of 10,
@@ -59,6 +65,21 @@ First test with `BATCH_SIZE = 2` in launcher.py, then send `launcher.log` for re
 - Slow internet (v1.3): the walk waits for every chat and the chat list to load (up to 90 s); load times are logged ("loaded after N s").
 - Open: a profile has a 15-minute cap in launcher.py (`PROFILE_MAX_SECONDS`); with very slow internet a profile may be closed before all chats are done. Owner has not asked to change it.
 - Next check: owner runs `launcher.bat` with `BATCH_SIZE = 2` and sends `launcher.log`.
+
+## Section 2: Chrome Opener (`chrome-opener/`, v2.1.0) - separate from section 1
+- What: Windows Python tool. Opens the owner's ~35 Chrome profiles one at a time, reads claude.ai with UI Automation (`py -m pip install psutil uiautomation`), goes to `claude.ai/chats` in the SAME tab (address bar; sidebar "View all" is the backup and is used to come back from a chat), opens each chat, clicks "Continue" / "Try again" on paused chats, closes the profile window when the free-usage limit message shows (reset time is saved in `profile_state.json`).
+- `Chrome_Opener_Shut_Down.py`: owner's separate helper (closes app windows normally, then shuts Windows down). Owner decided NOT to join it with the opener.
+- Runtime files next to the script: `activity_log.txt`, `profile_state.json`, `report.txt`. They are private: NEVER commit them and never paste them anywhere (the script copies text it reads from chats; a GitHub token once ended up in a log). Never write tokens or passwords into this repo or these notes.
+- Owner decisions (2026-11-28):
+  1. One profile at a time; when its work is done the window THIS script opened is closed (windows the owner opened himself are never closed).
+  2. Work in the main tab, no extra tab; go straight to `claude.ai/chats`.
+  3. Owner moves mouse / types -> script pauses, resumes after 3 quiet seconds (`USER_IDLE_RESUME_SECONDS`). The script's own clicks are not counted (Windows "last input" stamp is compared with the stamp taken right after the script's own action).
+  4. After a pass the script waits for the saved reset times (+2 min) and visits those profiles again (`AUTO_RESUME`); profiles that failed or whose window was closed are retried after 5 min, at most 2 times; the PC is kept awake while waiting.
+  5. `report.txt` (Bengali, one line per profile) is written after every pass.
+  6. Old wrong names saved in `profile_state.json` are removed at start.
+- Bugs found in the owner's logs and fixed: (a) sidebar buttons "Upgrade", "Group and sort", "New from a template", "Dismiss upgrade banner" were clicked as chats in narrow windows (sidebar wider than 19% of the window) -> the list area is now found from the page heading; (b) text of an OPEN chat was read as chat rows (a pause of the script let the page change) -> rows are only read when the page is the chat list, otherwise it goes back to the list or stops; (c) chat text such as "could not" looked like a pause message -> after 3 visits without a button the chat counts as a normal chat; (d) coming back to the list now has an address-bar backup.
+- Status: tested only with simulated pages and a fake clock (no real Windows/Chrome in the test). Owner's real run on 2026-11-28 10:06 shows a complete pass (clear=27, limited=7). If something fails, read `activity_log.txt` first.
+- Known: profiles that end "clear: some chats still pending" are not revisited automatically; windows left open by older runs are not closed by the script.
 
 ## Working together (several sessions use this repo)
 So that one session's work never breaks another's:
