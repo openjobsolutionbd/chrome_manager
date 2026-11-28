@@ -23,10 +23,12 @@ except ImportError:
     input("\nPress Enter to exit...")
     raise SystemExit(1)
 
-TOOLKIT_VERSION = "1.0.1"      # keep equal to the version in README.md / CHANGELOG.md / root README table
+TOOLKIT_VERSION = "1.1.0"      # keep equal to the version in README.md / CHANGELOG.md / root README table
 MAX_PROFILES = 35
-MAX_CONCURRENT_PROFILES = 10   # never more than this many open at the same time
-BATCH_SIZE = 10                # open up to this many profiles together in one batch
+# Batches (owner's rule): open BATCH_SIZE profiles first. Only when ALL of them are
+# finished (every window closed, normally because its limit was reached) the next
+# batch of up to BATCH_SIZE opens. Free slots are NOT refilled one by one.
+BATCH_SIZE = 10                # profiles opened together in one batch (= max open at once)
 BATCH_LAUNCH_GAP_SECONDS = 0.15  # tiny gap between launches inside a batch (no scanning in between)
 MAX_WAIT_FOR_WINDOW = 20  # only wait for the OS window; page verification runs in the watcher
 CHECK_INTERVAL_SECONDS = 0.5
@@ -883,13 +885,13 @@ def open_window_count(state):
     return sum(1 for s in state.values() if s["hwnd"] is not None)
 
 
-# ================= main: watch first, then open a batch, repeat =================
+# ================= main: watch first, then open the next batch only when the last one is finished =================
 
 plist = profiles()[:MAX_PROFILES]
 
 log("=" * 64)
 log(f"SMART CHROME PROFILE OPENER + LIMIT WATCHER v{TOOLKIT_VERSION} -- session started")
-log(f"Detected profiles={len(plist)} max_concurrent={MAX_CONCURRENT_PROFILES} batch_size={BATCH_SIZE} "
+log(f"Detected profiles={len(plist)} batch_size={BATCH_SIZE} (next batch opens only when the whole previous batch is finished) "
     f"check_interval={CHECK_INTERVAL_SECONDS}s safe_cpu<={SAFE_CPU_PERCENT:.0f}% "
     f"safe_ram<={SAFE_RAM_PERCENT:.0f}% retries=one end-of-pass retry + exponential backoff")
 
@@ -901,6 +903,8 @@ save_state(state)
 print("\nOpening profiles in batches and watching continuously. Press Ctrl+C to stop.\n")
 
 cycle_count = 0
+batch_number = 0
+batch_active = False
 last_heartbeat = time.time()
 pass_seconds = 0.0
 
@@ -917,22 +921,28 @@ try:
             if identify_manual_windows(state, plist, display_to_folders):
                 save_state(state)
 
-        # PHASE 2: if there are free slots, open the due profiles together as one batch.
-        free_slots = MAX_CONCURRENT_PROFILES - open_window_count(state)
-        if free_slots > 0:
+        # PHASE 2: a new batch opens ONLY when no profile window is open any more,
+        # i.e. the whole previous batch is finished. Never refill single slots.
+        if open_window_count(state) == 0:
+            if batch_active:
+                batch_active = False
+                log(f"Batch {batch_number} finished: all its windows are closed.")
             now = datetime.now()
             due = due_profiles(state, plist, running_profile_names(), now)
             if due and resources_safe_for_launch():
-                failed = launch_batch(due[:min(free_slots, BATCH_SIZE)], state)
+                batch_number += 1
+                batch_active = True
+                log(f"Starting batch {batch_number}.")
+                failed = launch_batch(due[:BATCH_SIZE], state)
 
-                # One bounded retry for profiles that failed in this batch.
+                # One bounded retry for profiles that failed in this batch (only to complete it).
                 if failed:
                     log(f"End-of-pass retry: {len(failed)} profile(s) failed earlier; retrying once where resources allow.")
                     time.sleep(END_PASS_RETRY_DELAY_SECONDS)
                     running_profiles = running_profile_names()
                     retry = [(p, i) for p, i in failed
                              if state[p]["hwnd"] is None and p not in running_profiles]
-                    retry_slots = MAX_CONCURRENT_PROFILES - open_window_count(state)
+                    retry_slots = BATCH_SIZE - open_window_count(state)
                     if retry and retry_slots > 0:
                         if resources_safe_for_launch():
                             launch_batch(retry[:retry_slots], state)
@@ -945,7 +955,7 @@ try:
                              if s["hwnd"] is not None and s.get("unverified_since") is not None)
             waiting = sum(1 for s in state.values()
                           if s["hwnd"] is None and s["reopen_at"] is not None)
-            log(f"Heartbeat: open={open_window_count(state)} (unverified={unverified}), "
+            log(f"Heartbeat: batch={batch_number}, open={open_window_count(state)} (unverified={unverified}), "
                 f"waiting for reset={waiting}, last scan pass={pass_seconds:.1f}s.")
 
         print(f"\r  Last check: {datetime.now():%H:%M:%S}  open={open_window_count(state)}  scan={pass_seconds:.1f}s   ",

@@ -9,10 +9,10 @@
 |---|---|---|---|
 | ১ | `1-claude-limit-closer-with-extention/` | এক্সটেনশন 1.5 · launcher.py 1.2.1 | [`CHANGELOG.md`](1-claude-limit-closer-with-extention/CHANGELOG.md) |
 | ২ | `2-chrome-opener-with-py/` | Chrome Opener 2.1.0 | [`CHANGELOG.md`](2-chrome-opener-with-py/CHANGELOG.md) |
-| ৩ | `3-only-chrome-opener/` | Only Chrome Opener 1.0.1 | [`CHANGELOG.md`](3-only-chrome-opener/CHANGELOG.md) |
+| ৩ | `3-only-chrome-opener/` | Only Chrome Opener 1.1.0 | [`CHANGELOG.md`](3-only-chrome-opener/CHANGELOG.md) |
 | ৪ | `4-chrome-opener-simple/` | Chrome Opener সিম্পল 1.0.0 | [`CHANGELOG.md`](4-chrome-opener-simple/CHANGELOG.md) |
 
-প্রতিটি ভার্সনের জন্য GitHub-এ একটা ট্যাগ থাকে: `claude-limit-closer-v1.5`, `chrome-opener-v2.1.0`, `only-chrome-opener-v1.0.1`, `chrome-opener-simple-v1.0.0`।
+প্রতিটি ভার্সনের জন্য GitHub-এ একটা ট্যাগ থাকে: `claude-limit-closer-v1.5`, `chrome-opener-v2.1.0`, `only-chrome-opener-v1.1.0`, `chrome-opener-simple-v1.0.0`।
 
 ## ফোল্ডার সাজানো
 ```
@@ -59,7 +59,7 @@ Python টুল (`Chrome_Opener.py`)। প্রোফাইল একটা �
 বিস্তারিত: [`2-chrome-opener-with-py/README.md`](2-chrome-opener-with-py/README.md)
 
 ## ৩. Only Chrome Opener — ফোল্ডার `3-only-chrome-opener/`
-Python টুল (`Chrome_Opener.py`)। **শুধু** প্রোফাইল খোলে আর লিমিট ধরে; চ্যাটে ঢুকে কিছু চাপে না। শুরুতে একসাথে ১০টা প্রোফাইল ব্যাচে খোলে, খোলা জানালাগুলো বারবার স্ক্যান করে, ফ্রি লিমিটের মেসেজ দেখলে ওই প্রোফাইল বন্ধ করে, আর রিসেটের সময় হলে নিজে আবার খোলে। সাথে `Chrome_Opener_Close_All` (সব Chrome জানালা বন্ধ) আর `Chrome_Opener_Shut_Down.py` (Chrome বন্ধ করে পিসি শাট ডাউন)।
+Python টুল (`Chrome_Opener.py`)। **শুধু** প্রোফাইল খোলে আর লিমিট ধরে; চ্যাটে ঢুকে কিছু চাপে না। আগে একসাথে ১০টা প্রোফাইল খোলে, ১০টার সবকটার কাজ শেষ হলে তবেই পরের ১০টা খোলে; খোলা জানালাগুলো বারবার স্ক্যান করে, ফ্রি লিমিটের মেসেজ দেখলে ওই প্রোফাইল বন্ধ করে, আর রিসেটের সময় হলে নিজে আবার খোলে। সাথে `Chrome_Opener_Close_All` (সব Chrome জানালা বন্ধ) আর `Chrome_Opener_Shut_Down.py` (Chrome বন্ধ করে পিসি শাট ডাউন)।
 বিস্তারিত: [`3-only-chrome-opener/README.md`](3-only-chrome-opener/README.md)
 
 ## ৪. Chrome Opener সিম্পল (কিছু মনে রাখে না) — ফোল্ডার `4-chrome-opener-simple/`
