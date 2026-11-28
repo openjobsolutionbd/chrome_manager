@@ -21,12 +21,14 @@ chrome_manager/
 ├── 1-claude-limit-closer-with-extention/  ← সেকশন ১
 │   ├── README.md
 │   ├── CHANGELOG.md
+│   ├── NOTES.md
 │   ├── extension/                         (Chrome এক্সটেনশন)
 │   ├── launcher.py
 │   └── launcher.bat
 └── 2-chrome-opener-with-py/               ← সেকশন ২
     ├── README.md
     ├── CHANGELOG.md
+    ├── NOTES.md
     ├── Chrome_Opener.py
     └── Chrome_Opener_Shut_Down.py
 ```
@@ -40,4 +42,4 @@ Python টুল (`Chrome_Opener.py`)। প্রোফাইল একটা �
 বিস্তারিত: [`2-chrome-opener-with-py/README.md`](2-chrome-opener-with-py/README.md)
 
 ## Claude-এর জন্য নোট
-[`NOTES.md`](NOTES.md) — সব সিদ্ধান্ত, সমস্যা ও নিয়ম।
+[`NOTES.md`](NOTES.md) — সবার জন্য নিয়ম। প্রতিটা সেকশনের নিজের `NOTES.md` আছে (সিদ্ধান্ত, সমস্যা, কীভাবে কাজ করে)।
